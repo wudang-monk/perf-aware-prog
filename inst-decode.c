@@ -89,16 +89,16 @@ int main(int argc, char *argv[]) {
         // Decode instruction
         char *reg = (cmd.w) ? w1_reg[cmd.reg] : w0_reg[cmd.reg];
         char *rm = (cmd.w) ? w1_rm[cmd.rm] : w0_rm[cmd.rm];
-        char *src = rm;
-        char *dst = reg;
+        char *src = reg;
+        char *dst = rm;
         if (cmd.d) {
-            src = reg;
-            dst = rm;
+            src = rm;
+            dst = reg;
         }
         /* Print_Instruction(cmd); */
         /* printf("SRC: %s, DST: %s\n", src, dst); */
         // Write out instruction to asm buffer
-        asm_buffer_index += sprintf(asm_buffer + asm_buffer_index, "mov %s, %s\n", src, dst);
+        asm_buffer_index += sprintf(asm_buffer + asm_buffer_index, "mov %s, %s\n", dst, src);
     }
     // Write out buffer to file to compare
     FILE *out = fopen(fileout, "w");
@@ -112,3 +112,4 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+// mov bx, cx
