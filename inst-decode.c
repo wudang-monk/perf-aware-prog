@@ -51,6 +51,11 @@ typedef union {
 /*     Print_Binary(cmd.reg); */
 /*     printf("R/M:    "); */
 /*     Print_Binary(cmd.rm); */
+/*     printf("First:   "); */
+/*     Print_Binary(cmd.cmds[0]); */
+/*     printf("Second:   "); */
+/*     Print_Binary(cmd.cmds[1]); */
+
 /* } */
 
 int main(int argc, char *argv[]) {
@@ -75,10 +80,8 @@ int main(int argc, char *argv[]) {
 
     fclose(fp);
 
-    char *w0_reg[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
-    char *w1_reg[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
-    char *w0_rm[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
-    char *w1_rm[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
+    char *word_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
+    char *byte_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 
     char asm_buffer[1024];
     int asm_buffer_index = sprintf(asm_buffer, ";;File: %s\nbits 16\n", filename);
@@ -87,8 +90,8 @@ int main(int argc, char *argv[]) {
         cmd.cmds[0] = buffer[i];
         cmd.cmds[1] = buffer[i + 1];
         // Decode instruction
-        char *reg = (cmd.w) ? w1_reg[cmd.reg] : w0_reg[cmd.reg];
-        char *rm = (cmd.w) ? w1_rm[cmd.rm] : w0_rm[cmd.rm];
+        char *reg = (cmd.w) ? byte_registers[cmd.reg] : word_registers[cmd.reg];
+        char *rm = (cmd.w) ? byte_registers[cmd.rm] : word_registers[cmd.rm];
         char *src = reg;
         char *dst = rm;
         if (cmd.d) {
@@ -112,4 +115,3 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
-// mov bx, cx
