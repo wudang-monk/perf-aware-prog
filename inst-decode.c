@@ -51,11 +51,12 @@ typedef union {
 /*     Print_Binary(cmd.reg); */
 /*     printf("R/M:    "); */
 /*     Print_Binary(cmd.rm); */
-/*     printf("First:   "); */
+/*     printf("Byte1:   "); */
 /*     Print_Binary(cmd.cmds[0]); */
-/*     printf("Second:   "); */
+/*     printf("Byte2:   "); */
 /*     Print_Binary(cmd.cmds[1]); */
-
+/*     printf("Whole:   "); */
+/*     Print_Binary(cmd.command); */
 /* } */
 
 int main(int argc, char *argv[]) {
@@ -64,6 +65,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    // open binary file
     char *filename = argv[1];
     char *fileout = argv[2] ? argv[2] : "asm_out.asm";
     FILE *fp = fopen(filename, "rb");
@@ -71,8 +73,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    u8 buffer[256] = {};
-    u64 bytes_read = fread(buffer, 1, sizeof(buffer), fp);
+    u16 buffer[256] = {};
+    u64 bytes_read = fread(buffer, 2, sizeof(buffer), fp);
     if (ferror(fp)) {
         fprintf(stderr, "Error opening BINARY IN file.\n");
         return 1;
@@ -83,13 +85,11 @@ int main(int argc, char *argv[]) {
     char *word_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
     char *byte_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 
-    char asm_buffer[1024];
-    int asm_buffer_index = sprintf(asm_buffer, ";;File: %s\nbits 16\n", filename);
-    for (int i = 0; i < bytes_read; i += 2) {
-        inst16 cmd = {};
-        cmd.cmds[0] = buffer[i];
-        cmd.cmds[1] = buffer[i + 1];
-        // Decode instruction
+    char out_buffer[1024];
+    int out_index = sprintf(out_buffer, ";;File: %s\nbits 16\n", filename);
+    for (int i = 0; i < bytes_read; i++) {
+        inst16 cmd = {.command = buffer[i]};
+        /* Decode instruction */
         char *reg = (cmd.w) ? byte_registers[cmd.reg] : word_registers[cmd.reg];
         char *rm = (cmd.w) ? byte_registers[cmd.rm] : word_registers[cmd.rm];
         char *src = reg;
@@ -99,18 +99,18 @@ int main(int argc, char *argv[]) {
             dst = reg;
         }
         /* Print_Instruction(cmd); */
-        /* printf("SRC: %s, DST: %s\n", src, dst); */
         // Write out instruction to asm buffer
-        asm_buffer_index += sprintf(asm_buffer + asm_buffer_index, "mov %s, %s\n", dst, src);
+        out_index += sprintf(out_buffer + out_index, "mov %s, %s\n", dst, src);
     }
-    // Write out buffer to file to compare
+
+    /* Write out asm instructions to file */
     FILE *out = fopen(fileout, "w");
     if (!out) {
         fprintf(stderr, "Error opening ASM OUT file.\n");
         return 1;
     }
 
-    fprintf(out, "%s", asm_buffer);
+    fprintf(out, "%s", out_buffer);
     fclose(out);
 
     return 0;
