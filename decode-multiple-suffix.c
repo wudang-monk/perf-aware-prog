@@ -59,44 +59,6 @@ typedef struct {
     u32 size;
 }buffer;
 
-void Print_Binary(u8 byte) {
-    u8 bits[8] = {};
-    int i = 7;
-    int count = 0;
-    int tmp_num = byte;
-    while (tmp_num > 0) {
-        bits[i] = tmp_num % 2;
-        tmp_num /= 2;
-        i--;
-        count++;
-    }
-
-    printf("%d   (%d bits, #x%x, #b", byte, count, byte);
-    for (int j = 0; j < 8; j++) {
-        printf("%d", bits[j]);
-    }
-    printf(")\n");
-}
-
-void Print_Instruction(reg_reg cmd) {
-    printf("\nOPCODE: ");
-    Print_Binary(cmd.opcode);
-    printf("D:      ");
-    Print_Binary(cmd.d);
-    printf("W:      ");
-    Print_Binary(cmd.w);
-    printf("MOD:    ");
-    Print_Binary(cmd.mod);
-    printf("REG:    ");
-    Print_Binary(cmd.reg);
-    printf("R/M:    ");
-    Print_Binary(cmd.rm);
-    printf("Byte1:   ");
-    Print_Binary(cmd.byte1);
-    printf("Byte2:   ");
-    Print_Binary(cmd.byte2);
-}
-
 char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *rm_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
