@@ -9,10 +9,10 @@ typedef int8_t i8;
 typedef int16_t i16;
 
 typedef enum {
-MEM_MODE = 0b0,
-MEM_MODE_8 = 0b1,
-MEM_MODE_16 = 0b10,
-REG_MODE = 0b11
+MOD_MEM = 0b0,
+MOD_MEM_8 = 0b1,
+MOD_MEM_16 = 0b10,
+MOD_REG = 0b11
 }mod;
 
 typedef enum {
@@ -58,21 +58,13 @@ char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *rm_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
 
 void Write_To_Buffer(reg_reg cmd, i16 disp, buffer *asm_buffer) {
-    char *reg;
-    char *rm;
+    char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
+    char *rm = (cmd.w) ? word_registers[cmd.rm] : byte_registers[cmd.rm];
 
-    if (cmd.w) {
-        reg = word_registers[cmd.reg];
-        rm = word_registers[cmd.rm];
-    } else {
-        reg = byte_registers[cmd.reg];
-        rm = byte_registers[cmd.rm];
-    }
-
-    if (cmd.mod != REG_MODE) {
+    if (cmd.mod != MOD_REG) {
         char rm_buffer[32] = {};
         rm = rm_table[cmd.rm];
-        if (cmd.rm == 0b110 && cmd.mod == MEM_MODE) {
+        if (cmd.rm == 0b110 && cmd.mod == MOD_MEM) {
             sprintf(rm_buffer, "[%hd]", disp);
         } else if (disp != 0){
             sprintf(rm_buffer, "[%s + %hd]", rm, disp);
@@ -82,14 +74,13 @@ void Write_To_Buffer(reg_reg cmd, i16 disp, buffer *asm_buffer) {
         rm = rm_buffer;
     }
 
-    char *src = reg;
-    char *dst = rm;
     if (cmd.d) {
-        src = rm;
-        dst = reg;
+        char *temp = reg;
+        reg = rm;
+        rm = temp;
     }
 
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "mov %s, %s\n", dst, src);
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "mov %s, %s\n", rm, reg);
 }
 
 i16 U8_To_I16(u8 high, u8 low) {
@@ -127,12 +118,11 @@ int main(int argc, char *argv[]) {
     buffer code_buffer = {.buffer = &file_buffer, .size = 256};
     char out_buffer[1024];
     buffer asm_buffer = {.buffer = &out_buffer, .size = 1024 };
-    asm_buffer.index = sprintf(out_buffer, ";;File: %s\nbits 16\n", filename);
+    asm_buffer.index = sprintf(out_buffer, ";;From file: %s\nbits 16\n", filename);
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
         u8 byte = Pop_From_Buffer(&code_buffer);
-        /* byte_lh byte = (byte_lh)file_buffer[i]; */
         int count = 1;
         switch(byte >> 4) {
             case REG_REG: {
@@ -141,52 +131,30 @@ int main(int argc, char *argv[]) {
                 cmd.byte2 = Pop_From_Buffer(&code_buffer);
 
                 switch(cmd.mod) {
-                    case MEM_MODE: {
-                        char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
-                        char *rm = rm_table[cmd.rm];
-                        char rm_buffer[32] = {};
-                        printf("REG_REG MEM_MODE: %x\n", cmd.byte1);
+                    case MOD_MEM: {
+                        i16 disp = 0;
                         if (cmd.rm == 0b110) {
-                            /* sprintf(rm_buffer, "[%hd]", disp); */
                             u8 disp_lo = Pop_From_Buffer(&code_buffer);
                             u8 disp_hi = Pop_From_Buffer(&code_buffer);
-                            i16 disp = U8_To_I16(disp_hi, disp_lo);
-                            Write_To_Buffer(cmd, disp, &asm_buffer);
-                        } else {
-                            Write_To_Buffer(cmd, 0, &asm_buffer);
+                            disp = U8_To_I16(disp_hi, disp_lo);
                         }
+                        Write_To_Buffer(cmd, disp, &asm_buffer);
                         break;
                     }
-                    case MEM_MODE_8: {
-                        char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
-                        char *rm = rm_table[cmd.rm];
-                        char rm_buffer[32] = {};
-                        printf("REG_REG MEM_MODE_8: %x\n", cmd.byte1);
+                    case MOD_MEM_8: {
                         i8 disp = Pop_From_Buffer(&code_buffer);
                         Write_To_Buffer(cmd, disp, &asm_buffer);
                         break;
                     }
-                    case MEM_MODE_16: {
-                        printf("REG_REG MEM_MODE_16: %x\n", cmd.byte1);
-                        char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
-                        char *rm = rm_table[cmd.rm];
-                        char rm_buffer[32] = {};
+                    case MOD_MEM_16: {
                         u8 disp_lo = Pop_From_Buffer(&code_buffer);
                         u8 disp_hi = Pop_From_Buffer(&code_buffer);
                         u16 disp = U8_To_I16(disp_hi, disp_lo);
                         Write_To_Buffer(cmd, disp, &asm_buffer);
                         break;
                     }
-                    case REG_MODE: {
-                        printf("REG_REG REG_MODE: %x\n", cmd.byte1);
-                        char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
-                        char *rm = (cmd.w) ? word_registers[cmd.rm] : byte_registers[cmd.rm];
-                        if (cmd.d) {
-                            char *tmp = reg;
-                            reg = rm;
-                            rm = tmp;
-                        }
-                        asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %s\n", rm, reg);
+                    case MOD_REG: {
+                        Write_To_Buffer(cmd, 0, &asm_buffer);
                         break;
                     }
                 }
@@ -199,21 +167,19 @@ int main(int argc, char *argv[]) {
                 char rm_buffer[32] = {};
                 char *rm = rm_table[cmd.rm];
                 switch(cmd.mod) {
-                    case MEM_MODE: {
+                    case MOD_MEM: {
                         u8 data_lo = Pop_From_Buffer(&code_buffer);
                         sprintf(rm_buffer, "[%s]", rm);
                         if (cmd.w) {
                             u8 data_hi = Pop_From_Buffer(&code_buffer);
                             i16 data = U8_To_I16(data_hi, data_lo);
                             asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, word %hd\n", rm_buffer, data);
-                            /* printf("IM_REG_MEM: MEM_MODE: mov %s, word %hd\n", rm_buffer, data); */
                         } else {
                             asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, byte %hd\n", rm_buffer, (i8)data_lo);
-                            /* printf("IM_REG_MEM: MEM_MODE: move %s, byte %hd\n", rm_buffer, (i8)data_lo); */
                         }
                         break;
                     }
-                    case MEM_MODE_8: {
+                    case MOD_MEM_8: {
                         u8 disp_lo = Pop_From_Buffer(&code_buffer);
                         u8 data_lo = Pop_From_Buffer(&code_buffer);
                         sprintf(rm_buffer, "[%s + %hd]", rm, (i8)disp_lo);
@@ -221,14 +187,12 @@ int main(int argc, char *argv[]) {
                             u8 data_hi = Pop_From_Buffer(&code_buffer);
                             i16 data = U8_To_I16(data_hi, data_lo);
                             asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, word %hd\n", rm_buffer, data);
-                            /* printf("IM_REG_MEG: MEM_MODE_8: mov %s, word %hd\n", rm_buffer, data); */
                         } else {
                             asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, byte %hd\n", rm_buffer, (i8)data_lo);
-                            /* printf("IM_REG_MEG: MEM_MODE_8: mov %s, byte %hd\n", rm_buffer, (i8)data_lo); */
                         }
                         break;
                     }
-                    case MEM_MODE_16: {
+                    case MOD_MEM_16: {
                         u8 disp_lo = Pop_From_Buffer(&code_buffer);
                         u8 disp_hi = Pop_From_Buffer(&code_buffer);
                         i16 disp = U8_To_I16(disp_hi, disp_lo);
@@ -238,15 +202,13 @@ int main(int argc, char *argv[]) {
                             u8 data_hi = Pop_From_Buffer(&code_buffer);
                             i16 data = U8_To_I16(data_hi, data_lo);
                             asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, word %hd\n", rm_buffer, data);
-                            /* printf("IM_REG_MEG: MEM_MODE_16: mov %s, word %hd\n", rm_buffer, data); */
                         } else {
                             asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, byte %hd\n", rm_buffer, (i8)data_lo);
-                            /* printf("IM_REG_MEG: MEM_MODE_16: mov %s, byte %hd\n", rm_buffer, (i8)data_lo); */
                         }
 
                         break;
                     }
-                    case REG_MODE: {
+                    case MOD_REG: {
                         printf("IM_REG_MEM: REG_MODE: %x\n", cmd.byte1);
                         break;
                     }
@@ -256,18 +218,15 @@ int main(int argc, char *argv[]) {
             case IM_REG: {
                 im_reg cmd = {};
                 cmd.byte = byte;
-                printf("IM_REG: %x\n", cmd.byte);
                 char *reg = byte_registers[cmd.reg];
                 u8 data_lo = Pop_From_Buffer(&code_buffer);
+                i16 data = data_lo;
                 if (cmd.w) {
                     reg = word_registers[cmd.reg];
                     u8 data_hi = Pop_From_Buffer(&code_buffer);
-                    u16 data_16 = U8_To_I16(data_hi, data_lo);
-                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", reg, data_16);
-                } else {
-                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %ud\n", reg, data_lo);
+                    data = U8_To_I16(data_hi, data_lo);
                 }
-
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", reg, data);
                 break;
             }
             case MEM_ACC: {
@@ -282,7 +241,6 @@ int main(int argc, char *argv[]) {
                 } else {
                     asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, [%hd]\n",  acc, address);
                 }
-                printf("MEM_ACC: %x\n", byte);
                 break;
             }
             default: {
