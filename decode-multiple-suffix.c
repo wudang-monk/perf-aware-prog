@@ -57,7 +57,7 @@ char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *rm_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
 
-void Write_To_Buffer(reg_reg cmd, i16 disp, buffer *asm_buffer) {
+void Write_Reg_Reg(reg_reg cmd, i16 disp, buffer *asm_buffer) {
     char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
     char *rm = (cmd.w) ? word_registers[cmd.rm] : byte_registers[cmd.rm];
 
@@ -138,23 +138,23 @@ int main(int argc, char *argv[]) {
                             u8 disp_hi = Pop_From_Buffer(&code_buffer);
                             disp = U8_To_I16(disp_hi, disp_lo);
                         }
-                        Write_To_Buffer(cmd, disp, &asm_buffer);
+                        Write_Reg_Reg(cmd, disp, &asm_buffer);
                         break;
                     }
                     case MOD_MEM_8: {
                         i8 disp = Pop_From_Buffer(&code_buffer);
-                        Write_To_Buffer(cmd, disp, &asm_buffer);
+                        Write_Reg_Reg(cmd, disp, &asm_buffer);
                         break;
                     }
                     case MOD_MEM_16: {
                         u8 disp_lo = Pop_From_Buffer(&code_buffer);
                         u8 disp_hi = Pop_From_Buffer(&code_buffer);
                         u16 disp = U8_To_I16(disp_hi, disp_lo);
-                        Write_To_Buffer(cmd, disp, &asm_buffer);
+                        Write_Reg_Reg(cmd, disp, &asm_buffer);
                         break;
                     }
                     case MOD_REG: {
-                        Write_To_Buffer(cmd, 0, &asm_buffer);
+                        Write_Reg_Reg(cmd, 0, &asm_buffer);
                         break;
                     }
                 }
