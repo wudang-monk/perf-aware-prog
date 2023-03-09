@@ -270,15 +270,25 @@ int main(int argc, char *argv[]) {
 
                 break;
             }
-            case MEM_ACC:
-                Pop_From_Buffer(&code_buffer);
-                Pop_From_Buffer(&code_buffer);
+            case MEM_ACC: {
+                reg_reg cmd = {};
+                cmd.byte1 = byte;
+                u8 addr_lo = Pop_From_Buffer(&code_buffer);
+                u8 addr_hi = Pop_From_Buffer(&code_buffer);
+                i16 address = U8_To_I16(addr_hi, addr_lo);
+                char *acc = (cmd.w) ? "ax" : "al";
+                if (cmd.d) {
+                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov [%hd], %s\n",  address, acc);
+                } else {
+                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, [%hd]\n",  acc, address);
+                }
                 printf("MEM_ACC: %x\n", byte);
-                count += 2;
                 break;
-            default:
+            }
+            default: {
                 printf("Cannot handle instruction: %x\n", byte);
                 break;
+            }
         }
     }
 
