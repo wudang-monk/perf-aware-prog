@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -16,17 +18,45 @@ MOD_REG = 0b11
 }mod;
 
 typedef enum {
-REG_REG = 0b1000,
-IM_REG_MEM = 0b1100,
-IM_REG = 0b1011,
-MEM_ACC = 0b1010,
-}mov_higbits;
+ACC = 1,
+BYTE2 = 2,
+M_R_RM = 3,
+MOV_I = 4
+}inst_type;
+
+typedef enum {
+ADD = 0,
+/* OR, */
+/* ADC, */
+/* SBB, */
+/* AND, */
+SUB = 5,
+/* XOR, */
+CMP = 7,
+MOV = 8,
+ANY = 9
+}op_type;
+
+typedef union {
+    struct {
+        u8 rm: 3;
+        u8 reg: 3;
+        mod mod: 2;
+    };
+    u8 byte;
+}mod_reg_rm;
+
+typedef struct {
+    u8 byte1;
+    op_type name;
+    inst_type type;
+}op_and_type;
 
 typedef union {
     struct {
         u16 w : 1;
         u16 d : 1;
-        u16 opcode : 6;
+        u16 opcode: 6;
         u16 rm: 3;
         u16 reg: 3;
         u16 mod: 2;
@@ -55,44 +85,273 @@ typedef struct {
 
 char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
-char *rm_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
+char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
+char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
 
-void Write_Reg_Reg(reg_reg cmd, i16 disp, buffer *asm_buffer) {
-    char *reg = (cmd.w) ? word_registers[cmd.reg] : byte_registers[cmd.reg];
-    char *rm = (cmd.w) ? word_registers[cmd.rm] : byte_registers[cmd.rm];
 
-    if (cmd.mod != MOD_REG) {
-        char rm_buffer[32] = {};
-        rm = rm_table[cmd.rm];
-        if (cmd.rm == 0b110 && cmd.mod == MOD_MEM) {
-            sprintf(rm_buffer, "[%hd]", disp);
-        } else if (disp != 0){
-            sprintf(rm_buffer, "[%s + %hd]", rm, disp);
-        } else {
-            sprintf(rm_buffer, "[%s]", rm);
-        }
-        rm = rm_buffer;
-    }
+op_and_type Handled_Instrs[] = {
+{0x0, ADD, M_R_RM},
+{0x1, ADD, M_R_RM},
+{0x2, ADD, M_R_RM},
+{0x3, ADD, M_R_RM},
+{0x4, ADD, ACC},
+{0x5, ADD, ACC},
+{0x28, SUB, M_R_RM},
+{0x29, SUB, M_R_RM},
+{0x2A, SUB, M_R_RM},
+{0x2B, SUB, M_R_RM},
+{0x2C, SUB,ACC},
+{0x2D, SUB,ACC},
+{0x38, CMP, M_R_RM},
+{0x39, CMP, M_R_RM},
+{0x3A, CMP, M_R_RM},
+{0x3B, CMP, M_R_RM},
+{0x3C, CMP, ACC},
+{0x3D, CMP, ACC},
+{0x80, ANY, BYTE2},
+{0x81, ANY, BYTE2},
+{0x82, ANY, BYTE2},
+{0x83, ANY, BYTE2},
+{0x88, MOV, M_R_RM},
+{0x89, MOV, M_R_RM},
+{0x8A, MOV, M_R_RM},
+{0x8B, MOV, M_R_RM},
+{0x8C, MOV, ACC},
+{0xA0, MOV, ACC},
+{0xA1, MOV, ACC},
+{0xA2, MOV, ACC},
+{0xA3, MOV, ACC},
+{0xB0, MOV, MOV_I},
+{0xB1, MOV, MOV_I},
+{0xB2, MOV, MOV_I},
+{0xB3, MOV, MOV_I},
+{0xB4, MOV, MOV_I},
+{0xB5, MOV, MOV_I},
+{0xB6, MOV, MOV_I},
+{0xB7, MOV, MOV_I},
+{0xB8, MOV, MOV_I},
+{0xB9, MOV, MOV_I},
+{0xBA, MOV, MOV_I},
+{0xBB, MOV, MOV_I},
+{0xBC, MOV, MOV_I},
+{0xBD, MOV, MOV_I},
+{0xBE, MOV, MOV_I},
+{0xBF, MOV, MOV_I},
+{0xC6, MOV, BYTE2},
+{0xC7, MOV, BYTE2}
+};
 
-    if (cmd.d) {
-        char *temp = reg;
-        reg = rm;
-        rm = temp;
-    }
+op_and_type All_Instrs[256] = {};
 
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "mov %s, %s\n", rm, reg);
-}
 
-i16 U8_To_I16(u8 high, u8 low) {
+
+i16 U8ToI16(u8 high, u8 low) {
     i16 result = ((i16)high << 8 | low);
     return result;
 }
 
-u8 Pop_From_Buffer(buffer *buff) {
+u8 PopFromBuffer(buffer *buff) {
     u8 result = *(u8*)(buff->buffer + buff->index);
     ++buff->index;
     return result;
 }
+
+void ModRegRm(u8 byte1, buffer *code_buffer) {
+    u8 wide = byte1 & 0b00000001;
+    u8 reverse = byte1 & 0b00000010;
+    mod_reg_rm byte2 = {.byte = PopFromBuffer(code_buffer)};
+    char command[16] = {};
+    op_and_type instr = All_Instrs[byte1];
+    char *instr_name = Instr_Names[instr.name];
+    switch(byte2.mod) {
+        case MOD_MEM:
+        case MOD_MEM_8:
+        case MOD_MEM_16: {
+            char *rm = rm_mem_table[byte2.rm];
+            char *reg = (wide) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
+            char mem_addr[16] = {};
+            i16 disp = 0;
+            u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM & byte2.rm == 0b110) ? 1 : 0;
+
+            if (byte2.mod == MOD_MEM_8) {
+                i8 disp_lo = PopFromBuffer(code_buffer);
+                disp = (i16)disp_lo;
+            } else if ((mem_mode_16bit_disp) || (byte2.mod == MOD_MEM_16)) {
+                u8 disp_lo = PopFromBuffer(code_buffer);
+                u8 disp_hi = PopFromBuffer(code_buffer);
+                disp = U8ToI16(disp_hi, disp_lo);
+            }
+
+            if (byte2.mod == MOD_MEM) {
+                sprintf(mem_addr, "[%s]", rm);
+            } else {
+                sprintf(mem_addr, "[%s + %hd]", rm, disp);
+            }
+            char *src = reg;
+            char *dst = mem_addr;
+
+            if (mem_mode_16bit_disp) {
+                sprintf(command, "%s %s, [%hd]", instr_name, reg, disp);
+            } else {
+                if (reverse) {
+                    char *tmp = src;
+                    src = dst;
+                    dst = tmp;
+                }
+                sprintf(command, "%s %s, %s", instr_name, dst, src);
+            }
+            printf("Command: %s\n", command);
+            break;
+        }
+        case MOD_REG: {
+            printf("MOD Register mode: NOT Implemented\n");
+            break;
+        }
+    }
+}
+
+
+void AccInstr(u8 byte1, buffer *code_buffer) {
+    u8 wide = byte1 & 0b00000001;
+    op_and_type instr = All_Instrs[byte1];
+    char *dst = "al";
+    u8 data_lo = PopFromBuffer(code_buffer);
+    i16 data = (i8)data_lo;
+    char command[16] = {};
+
+    if (instr.name == MOV) {
+        u8 data_hi = PopFromBuffer(code_buffer);
+        data = U8ToI16(data_hi, data_lo);
+        char mem_addr[8] = {};
+        sprintf(mem_addr, "[%hd]", data);
+        char *src = mem_addr;
+        u8 reverse = byte1 & 0b00000010;
+
+        if (reverse) {
+            char *tmp = dst;
+            dst = src;
+            src = tmp;
+        }
+        sprintf(command, "mov %s, %s", dst, src);
+
+    } else {
+        if (wide) {
+            dst = "ax";
+            u8 data_hi = PopFromBuffer(code_buffer);
+            data = U8ToI16(data_hi, data_lo);
+        }
+
+        char *instr_name = Instr_Names[instr.name];
+        sprintf(command, "%s %s, %hd", instr_name, dst, data);
+    }
+    printf("Command: %s\n", command);
+}
+
+
+/* void Process_BYTE2_OP(u8 byte, buffer *code_buffer) { */
+/*     mod_reg_rm byte_op = {.byte = Pop_From_Buffer(code_buffer)}; */
+/*     char *op_name = op_names[byte_op.reg]; */
+/*     char command[32] = {}; */
+/*     char data_str[16] = {}; */
+/*     char rm_str[16] = {}; */
+/*     char *rm; */
+/*     switch(byte_op.mod) { */
+/*         case MOD_MEM: { */
+/*             rm = rm_mem_table[byte_op.rm]; */
+/*             /\* char *reg = byte_registers[byte_op.reg]; *\/ */
+/*             u8 wide = byte & 0b00000001; */
+/*             u8 sign_ext = byte & 0b00000010; */
+/*             u8 data_lo = Pop_From_Buffer(code_buffer); */
+/*             i16 data = 0; */
+/*             char *data_size = "byte"; */
+/*             if (wide) { */
+/*                 data_size = "word"; */
+/*                 u8 data_hi = Pop_From_Buffer(code_buffer); */
+/*                 data = U8_To_I16(data_hi, data_lo); */
+/*                 if (sign_ext == 0) { */
+/*                     printf("Sign extension!!!!\n"); */
+/*                 } */
+/*             } else { */
+/*                 data = (i8)data_lo; */
+/*             } */
+
+/*             sprintf(rm_str, "[%s]", rm); */
+/*             sprintf(command, "%s %s, %s, %hd\n", op_name, rm_str, data_size, data); */
+/*             printf("BYTE2_OP: MOD_MEM %s", command); */
+/*             break; */
+/*         } */
+/*         case MOD_MEM_8: { */
+/*             rm = rm_mem_table[byte_op.rm]; */
+/*             u8 wide = byte & 0b00000001; */
+/*             u8 sign_ext = byte & 0b00000010; */
+/*             i8 disp = Pop_From_Buffer(code_buffer); */
+/*             u8 data_lo = Pop_From_Buffer(code_buffer); */
+/*             char *data_size = "byte"; */
+/*             i16 data = data_lo; */
+
+/*             if (wide) { */
+/*                 data_size = "word"; */
+/*                 u8 data_hi = Pop_From_Buffer(code_buffer); */
+/*                 data = U8_To_I16(data_hi, data_lo); */
+/*                 if (sign_ext == 0) { */
+/*                     printf("Sign extension!!!!\n"); */
+/*                 } */
+/*             } */
+
+/*             char rm_str[16] = {}; */
+/*             char *sum_or_minus = (disp > 0) ? "+" : "-"; */
+/*             sprintf(rm_str, "[%s %s %hd]", rm, sum_or_minus, abs(disp)); */
+/*             sprintf(command, "%s %s, %s %hd\n", op_name, rm_str, data_size, data); */
+/*             printf("BYTE2_OP: MOD_MEM_8 %s", command); */
+
+/*             break; */
+/*         } */
+/*         case MOD_MEM_16: { */
+/*             rm = rm_mem_table[byte_op.rm]; */
+/*             u8 wide = byte & 0b00000001; */
+/*             u8 sign_ext = byte & 0b00000010; */
+/*             u8 disp_lo = Pop_From_Buffer(code_buffer); */
+/*             u8 disp_hi = Pop_From_Buffer(code_buffer); */
+/*             u8 data_lo = Pop_From_Buffer(code_buffer); */
+/*             i16 disp = U8_To_I16(disp_hi, disp_lo); */
+/*             i16 data = data_lo; */
+/*             char *data_size = "byte"; */
+/*             if (wide) { */
+/*                 data_size = "word"; */
+/*                 u8 data_hi = Pop_From_Buffer(code_buffer); */
+/*                 data = U8_To_I16(data_hi, data_lo); */
+/*                 if (sign_ext == 0) { */
+/*                     printf("Sign extension!!!!\n"); */
+/*                 } */
+/*             } */
+
+/*             char rm_str[16] = {}; */
+/*             char *sum_or_minus = (disp > 0) ? "+" : "-"; */
+/*             sprintf(rm_str, "[%s %s %hd]", rm, sum_or_minus, abs(disp)); */
+/*             sprintf(command, "%s %s, %s %hd\n", op_name, rm_str, data_size, data); */
+/*             printf("BYTE2_OP: MOD_MEM_16 %s", command); */
+/*             break; */
+/*         } */
+/*         case MOD_REG: { */
+/*             rm = byte_registers[byte_op.rm]; */
+/*             u8 wide = byte & 0b00000001; */
+/*             u8 sign_ext = byte & 0b00000010; */
+/*             u8 data_lo = Pop_From_Buffer(code_buffer); */
+/*             i16 data = data_lo; */
+/*             if (wide) { */
+/*                 rm = word_registers[byte_op.rm]; */
+/*                 if (sign_ext == 0) { */
+/*                     u8 data_hi = Pop_From_Buffer(code_buffer); */
+/*                     data = U8_To_I16(data_hi, data_lo); */
+/*                 } */
+/*             } */
+/*             sprintf(command, "%s %s, %hd\n", op_name, rm, data); */
+/*             printf("BYTE2_OP: MOD_REG %s", command); */
+/*             break; */
+/*         } */
+/*     } */
+/* } */
+
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -114,6 +373,10 @@ int main(int argc, char *argv[]) {
     }
 
     fclose(fp);
+    for (int i = 0; i < ARRAY_SIZE(Handled_Instrs); i++) {
+        op_and_type inst = Handled_Instrs[i];
+        All_Instrs[inst.byte1] = inst;
+    }
 
     buffer code_buffer = {.buffer = &file_buffer, .size = 256};
     char out_buffer[1024];
@@ -122,143 +385,149 @@ int main(int argc, char *argv[]) {
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
-        u8 byte = Pop_From_Buffer(&code_buffer);
-        int count = 1;
-        switch(byte >> 4) {
-            case REG_REG: {
-                reg_reg cmd = {};
-                cmd.byte1 = byte;
-                cmd.byte2 = Pop_From_Buffer(&code_buffer);
+        u8 byte1 = PopFromBuffer(&code_buffer);
+        /* printf("BYTE: %d\n", byte); */
+        op_and_type op = All_Instrs[byte1];
+        switch(op.type) {
+            case ACC: {
+                AccInstr(byte1, &code_buffer);
+                break;
+            }
+            case M_R_RM: {
+                ModRegRm(byte1, &code_buffer);
+                break;
+            }
+            /* case M_R_RM: { */
+            /*     char *op_name = op_names[op.name]; */
+            /*     printf("MOD_REG_RM:  "); */
+            /*     mod_reg_rm byte2 = {.byte = Pop_From_Buffer(&code_buffer)}; */
+            /*     switch(byte2.mod) { */
+            /*         case MOD_MEM: { */
+            /*             u8 wide = byte1 & 0b00000001; */
+            /*             char *reg = (wide) ? word_registers[byte2.reg] : byte_registers[byte2.reg]; */
+            /*             char *rm = rm_mem_table[byte2.rm]; */
+            /*             u8 sign_ext = byte1 & 0b00000010; */
+            /*             char rm_str[16] = {}; */
+            /*             char data_str[16] = {}; */
+            /*             sprintf(rm_str, "[%s]", rm); */
+            /*             rm = rm_str; */
 
-                switch(cmd.mod) {
-                    case MOD_MEM: {
-                        i16 disp = 0;
-                        if (cmd.rm == 0b110) {
-                            u8 disp_lo = Pop_From_Buffer(&code_buffer);
-                            u8 disp_hi = Pop_From_Buffer(&code_buffer);
-                            disp = U8_To_I16(disp_hi, disp_lo);
-                        }
-                        Write_Reg_Reg(cmd, disp, &asm_buffer);
-                        break;
-                    }
-                    case MOD_MEM_8: {
-                        i8 disp = Pop_From_Buffer(&code_buffer);
-                        Write_Reg_Reg(cmd, disp, &asm_buffer);
-                        break;
-                    }
-                    case MOD_MEM_16: {
-                        u8 disp_lo = Pop_From_Buffer(&code_buffer);
-                        u8 disp_hi = Pop_From_Buffer(&code_buffer);
-                        u16 disp = U8_To_I16(disp_hi, disp_lo);
-                        Write_Reg_Reg(cmd, disp, &asm_buffer);
-                        break;
-                    }
-                    case MOD_REG: {
-                        Write_Reg_Reg(cmd, 0, &asm_buffer);
-                        break;
-                    }
-                }
-                break;
-            }
-            case IM_REG_MEM: {
-                reg_reg cmd = {};
-                cmd.byte1 = byte;
-                cmd.byte2 = Pop_From_Buffer(&code_buffer);
-                char rm_buffer[32] = {};
-                char *rm = rm_table[cmd.rm];
-                switch(cmd.mod) {
-                    case MOD_MEM: {
-                        u8 data_lo = Pop_From_Buffer(&code_buffer);
-                        sprintf(rm_buffer, "[%s]", rm);
-                        if (cmd.w) {
-                            u8 data_hi = Pop_From_Buffer(&code_buffer);
-                            i16 data = U8_To_I16(data_hi, data_lo);
-                            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, word %hd\n", rm_buffer, data);
-                        } else {
-                            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, byte %hd\n", rm_buffer, (i8)data_lo);
-                        }
-                        break;
-                    }
-                    case MOD_MEM_8: {
-                        u8 disp_lo = Pop_From_Buffer(&code_buffer);
-                        u8 data_lo = Pop_From_Buffer(&code_buffer);
-                        sprintf(rm_buffer, "[%s + %hd]", rm, (i8)disp_lo);
-                        if (cmd.w) {
-                            u8 data_hi = Pop_From_Buffer(&code_buffer);
-                            i16 data = U8_To_I16(data_hi, data_lo);
-                            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, word %hd\n", rm_buffer, data);
-                        } else {
-                            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, byte %hd\n", rm_buffer, (i8)data_lo);
-                        }
-                        break;
-                    }
-                    case MOD_MEM_16: {
-                        u8 disp_lo = Pop_From_Buffer(&code_buffer);
-                        u8 disp_hi = Pop_From_Buffer(&code_buffer);
-                        i16 disp = U8_To_I16(disp_hi, disp_lo);
-                        u8 data_lo = Pop_From_Buffer(&code_buffer);
-                        sprintf(rm_buffer, "[%s + %hd]", rm, disp);
-                        if (cmd.w) {
-                            u8 data_hi = Pop_From_Buffer(&code_buffer);
-                            i16 data = U8_To_I16(data_hi, data_lo);
-                            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, word %hd\n", rm_buffer, data);
-                        } else {
-                            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, byte %hd\n", rm_buffer, (i8)data_lo);
-                        }
+            /*             if (byte2.rm == 0b110) { */
+            /*                 printf("16bit displacement\n"); */
+            /*                 u8 disp_lo = Pop_From_Buffer(&code_buffer); */
+            /*                 u8 disp_hi = Pop_From_Buffer(&code_buffer); */
+            /*                 i16 disp = U8_To_I16(disp_hi, disp_lo); */
+            /*                 sprintf(rm_str, "[%hd]", disp); */
 
-                        break;
-                    }
-                    case MOD_REG: {
-                        printf("IM_REG_MEM: REG_MODE: %x\n", cmd.byte1);
-                        break;
-                    }
-                }
-                break;
-            }
-            case IM_REG: {
-                im_reg cmd = {};
-                cmd.byte = byte;
-                char *reg = byte_registers[cmd.reg];
-                u8 data_lo = Pop_From_Buffer(&code_buffer);
-                i16 data = data_lo;
-                if (cmd.w) {
-                    reg = word_registers[cmd.reg];
-                    u8 data_hi = Pop_From_Buffer(&code_buffer);
-                    data = U8_To_I16(data_hi, data_lo);
-                }
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", reg, data);
-                break;
-            }
-            case MEM_ACC: {
-                reg_reg cmd = {};
-                cmd.byte1 = byte;
-                u8 addr_lo = Pop_From_Buffer(&code_buffer);
-                u8 addr_hi = Pop_From_Buffer(&code_buffer);
-                i16 address = U8_To_I16(addr_hi, addr_lo);
-                char *acc = (cmd.w) ? "ax" : "al";
-                if (cmd.d) {
-                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov [%hd], %s\n",  address, acc);
-                } else {
-                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, [%hd]\n",  acc, address);
-                }
-                break;
-            }
+            /*             } */
+
+            /*             if (sign_ext) { */
+            /*                 char *tmp = reg; */
+            /*                 reg = rm; */
+            /*                 rm = tmp; */
+            /*             } */
+            /*             /\* sprintf(command, "%s %s, %hd\n", op_name, rm_str, reg); *\/ */
+            /*             /\* printf("MOD_MEM:  \n"); *\/ */
+            /*             printf("MOD_MEM:  %s %s, %s\n", op_name, rm, reg); */
+
+            /*             break; */
+            /*         } */
+            /*         case MOD_MEM_8: { */
+            /*             u8 wide = byte1 & 0b00000001; */
+            /*             char *reg = (wide) ? word_registers[byte2.reg] : byte_registers[byte2.reg]; */
+            /*             char *rm = rm_mem_table[byte2.rm]; */
+            /*             u8 sign_ext = byte1 & 0b00000010; */
+            /*             i8 data_lo = Pop_From_Buffer(&code_buffer); */
+            /*             char rm_str[16] = {}; */
+            /*             sprintf(rm_str, "[%s + %hd]", rm, data_lo); */
+            /*             rm = rm_str; */
+
+            /*             if (sign_ext) { */
+            /*                 char *tmp = reg; */
+            /*                 reg = rm; */
+            /*                 rm = tmp; */
+            /*             } */
+            /*             /\* sprintf(command, "%s %s, %hd\n", op_name, rm_str, reg); *\/ */
+            /*             printf("MOD_MEM_8:  %s %s, %s\n", op_name, rm, reg); */
+            /*             break; */
+            /*         } */
+            /*         case MOD_MEM_16: { */
+            /*             u8 wide = byte1 & 0b00000001; */
+            /*             char *reg = (wide) ? word_registers[byte2.reg] : byte_registers[byte2.reg]; */
+            /*             char *rm = rm_mem_table[byte2.rm]; */
+            /*             u8 sign_ext = byte1 & 0b00000010; */
+            /*             u8 data_lo = Pop_From_Buffer(&code_buffer); */
+            /*             u8 data_hi = Pop_From_Buffer(&code_buffer); */
+            /*             i16 data = U8_To_I16(data_hi, data_lo); */
+
+            /*             char rm_str[16] = {}; */
+            /*             sprintf(rm_str, "[%s %s %d]", rm, (data > 0) ? "+" : "-", data); */
+            /*             rm = rm_str; */
+
+            /*             if (sign_ext) { */
+            /*                 char *tmp = reg; */
+            /*                 reg = rm; */
+            /*                 rm = tmp; */
+            /*             } */
+            /*             /\* sprintf(command, "%s %s, %hd\n", op_name, rm_str, reg); *\/ */
+            /*             printf("MOD_MEM_16:  %s %s, %s\n", op_name, rm, reg); */
+            /*             break; */
+            /*         } */
+            /*         case MOD_REG: { */
+            /*             u8 wide = byte1 & 0b00000001; */
+            /*             char *reg = (wide) ? word_registers[byte2.reg] : byte_registers[byte2.reg]; */
+            /*             char *rm = (wide) ? word_registers[byte2.rm] : byte_registers[byte2.rm]; */
+            /*             u8 sign_ext = byte1 & 0b00000010; */
+            /*             char rm_str[16] = {}; */
+
+            /*             if (sign_ext) { */
+            /*                 char *tmp = reg; */
+            /*                 reg = rm; */
+            /*                 rm = tmp; */
+            /*             } */
+            /*             /\* sprintf(command, "%s %s, %hd\n", op_name, rm_str, reg); *\/ */
+            /*             printf("MOD_REG:  %s %s, %s\n", op_name, rm, reg); */
+
+            /*             break; */
+            /*         } */
+
+            /*     } */
+
+            /*     break; */
+            /* } */
+            /* case MOV_I: { */
+            /*     char *op_name = op_names[op.name]; */
+            /*     u8 data_lo = Pop_From_Buffer(&code_buffer); */
+            /*     u8 wide = (byte1 >> 3) & 0b00001; */
+            /*     u8 mov_reg = byte1 & 0b00000111; */
+            /*     char *reg = byte_registers[mov_reg]; */
+            /*     i16 data = data_lo; */
+            /*     if (wide) { */
+            /*         u8 data_hi = Pop_From_Buffer(&code_buffer); */
+            /*         data = U8_To_I16(data_hi, data_lo); */
+            /*         reg = word_registers[mov_reg]; */
+            /*     } */
+            /*     printf("MOV_IMM: %s %s, %hd\n", op_name, reg, data); */
+            /*     break; */
+            /* } */
             default: {
-                printf("Cannot handle instruction: %x\n", byte);
+                printf("OP: %d, %x, NOT handled\n", byte1, byte1);
                 break;
             }
         }
+
     }
 
-    printf("ASM File:\n%s", out_buffer);
-    FILE *out = fopen(fileout, "w");
-    if (!out) {
-        fprintf(stderr, "Error opening ASM OUT file.\n");
-        return 1;
-    }
+    /* printf("ASM File:\n%s", out_buffer); */
+    /* FILE *out = fopen(fileout, "w"); */
+    /* if (!out) { */
+    /*     fprintf(stderr, "Error opening ASM OUT file.\n"); */
+    /*     return 1; */
+    /* } */
 
-    fprintf(out, "%s", (char*)asm_buffer.buffer);
-    fclose(out);
+    /* fprintf(out, "%s", (char*)asm_buffer.buffer); */
+    /* fclose(out); */
 
     return 0;
 }
+
