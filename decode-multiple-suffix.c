@@ -54,6 +54,15 @@ typedef struct {
 
 typedef union {
     struct {
+        u8 w: 1;
+        u8 d: 1;
+        u8 opcode: 6;
+    };
+    u8 byte;
+}byte1;
+
+typedef union {
+    struct {
         u16 w : 1;
         u16 d : 1;
         u16 opcode: 6;
@@ -144,7 +153,6 @@ op_and_type Handled_Instrs[] = {
 op_and_type All_Instrs[256] = {};
 
 
-
 i16 U8ToI16(u8 high, u8 low) {
     i16 result = ((i16)high << 8 | low);
     return result;
@@ -156,19 +164,17 @@ u8 PopFromBuffer(buffer *buff) {
     return result;
 }
 
-void ModRegRm(u8 byte1, buffer *code_buffer) {
-    u8 wide = byte1 & 0b00000001;
-    u8 reverse = byte1 & 0b00000010;
+void ModRegRm(byte1 byte, buffer *code_buffer) {
     mod_reg_rm byte2 = {.byte = PopFromBuffer(code_buffer)};
     char command[16] = {};
-    op_and_type instr = All_Instrs[byte1];
+    op_and_type instr = All_Instrs[byte.byte];
     char *instr_name = Instr_Names[instr.name];
     switch(byte2.mod) {
         case MOD_MEM:
         case MOD_MEM_8:
         case MOD_MEM_16: {
             char *rm = rm_mem_table[byte2.rm];
-            char *reg = (wide) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
+            char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
             char mem_addr[16] = {};
             i16 disp = 0;
             u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM & byte2.rm == 0b110) ? 1 : 0;
@@ -193,26 +199,28 @@ void ModRegRm(u8 byte1, buffer *code_buffer) {
             if (mem_mode_16bit_disp) {
                 sprintf(command, "%s %s, [%hd]", instr_name, reg, disp);
             } else {
-                if (reverse) {
+                if (byte.d) {
                     char *tmp = src;
                     src = dst;
                     dst = tmp;
                 }
                 sprintf(command, "%s %s, %s", instr_name, dst, src);
             }
-            printf("Command: %s\n", command);
+            printf("MOD REG R/M: Command: %s\n", command);
             break;
         }
         case MOD_REG: {
+            char *rm = rm_mem_table[byte2.rm];
+            char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
             printf("MOD Register mode: NOT Implemented\n");
             break;
         }
     }
 }
 
-void AccInstr(u8 byte1, buffer *code_buffer) {
-    u8 wide = byte1 & 0b00000001;
-    op_and_type instr = All_Instrs[byte1];
+void AccInstr(byte1 byte, buffer *code_buffer) {
+    /* u8 wide = byte1 & 0b00000001; */
+    op_and_type instr = All_Instrs[byte.byte];
     char *dst = "al";
     u8 data_lo = PopFromBuffer(code_buffer);
     i16 data = (i8)data_lo;
@@ -224,9 +232,9 @@ void AccInstr(u8 byte1, buffer *code_buffer) {
         char mem_addr[8] = {};
         sprintf(mem_addr, "[%hd]", data);
         char *src = mem_addr;
-        u8 reverse = byte1 & 0b00000010;
+        /* u8 reverse = byte1 & 0b00000010; */
 
-        if (reverse) {
+        if (byte.d) {
             char *tmp = dst;
             dst = src;
             src = tmp;
@@ -234,7 +242,7 @@ void AccInstr(u8 byte1, buffer *code_buffer) {
         sprintf(command, "mov %s, %s", dst, src);
 
     } else {
-        if (wide) {
+        if (byte.w) {
             dst = "ax";
             u8 data_hi = PopFromBuffer(code_buffer);
             data = U8ToI16(data_hi, data_lo);
@@ -243,7 +251,7 @@ void AccInstr(u8 byte1, buffer *code_buffer) {
         char *instr_name = Instr_Names[instr.name];
         sprintf(command, "%s %s, %hd", instr_name, dst, data);
     }
-    printf("Command: %s\n", command);
+    printf("ACC Command: %s\n", command);
 }
 
 int main(int argc, char *argv[]) {
@@ -278,24 +286,65 @@ int main(int argc, char *argv[]) {
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
-        u8 byte1 = PopFromBuffer(&code_buffer);
-        /* printf("BYTE: %d\n", byte); */
-        op_and_type op = All_Instrs[byte1];
-        switch(op.type) {
+        byte1 byte = {.byte = PopFromBuffer(&code_buffer)};
+        char command[32] = {};
+        op_and_type instr = All_Instrs[byte.byte];
+        switch(instr.type) {
             case ACC: {
-                AccInstr(byte1, &code_buffer);
+                AccInstr(byte, &code_buffer);
                 break;
             }
             case M_R_RM: {
-                ModRegRm(byte1, &code_buffer);
+                ModRegRm(byte, &code_buffer);
+                break;
+            }
+            case BYTE2: {
+                mod_reg_rm byte2 = {.byte = PopFromBuffer(&code_buffer)};
+                char *instr_name = Instr_Names[byte2.reg];
+                char *rm = rm_mem_table[byte2.rm];
+                if (byte2.mod == MOD_REG) {
+                    rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
+                }
+
+                char mem_addr[16] = {};
+                i16 disp = 0;
+
+                if (byte2.mod == MOD_MEM_8) {
+                    i8 disp_lo = PopFromBuffer(&code_buffer);
+                    disp = (i16)disp_lo;
+                } else if (byte2.mod == MOD_MEM_16) {
+                    u8 disp_lo = PopFromBuffer(&code_buffer);
+                    u8 disp_hi = PopFromBuffer(&code_buffer);
+                    disp = U8ToI16(disp_hi, disp_lo);
+                }
+
+                if (byte2.mod == MOD_MEM) {
+                    sprintf(mem_addr, "[%s]", rm);
+                } else {
+                    sprintf(mem_addr, "[%s + %hd]", rm, disp);
+                }
+                char *dst = (byte2.mod == MOD_REG) ? rm : mem_addr;
+
+                u8 data_lo = PopFromBuffer(&code_buffer);
+                i16 data = (i8)data_lo;
+                char *data_size = (byte.w) ? "word" : "byte";
+                if (byte.d) {
+                    printf("MEM Sign extend 8-bit\n");
+                } else if (byte.w) {
+                    u8 data_hi = PopFromBuffer(&code_buffer);
+                    data = U8ToI16(data_hi, data_lo);
+                }
+
+                sprintf(command, "%s %s, %s %hd", instr_name, dst, data_size, data);
+
+                printf("BYTE2 Command: %s\n", command);
                 break;
             }
             default: {
-                printf("OP: %d, %x, NOT handled\n", byte1, byte1);
+                printf("OP: %d, %x, NOT handled\n", byte.byte, byte.byte);
                 break;
             }
         }
-
     }
 
     /* printf("ASM File:\n%s", out_buffer); */
