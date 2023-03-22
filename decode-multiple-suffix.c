@@ -276,7 +276,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    u8 file_buffer[256] = {};
+    u8 file_buffer[512] = {};
     u64 bytes_read = fread(file_buffer, 1, sizeof(file_buffer), fp);
     if (ferror(fp)) {
         fprintf(stderr, "Error opening BINARY IN file.\n");
@@ -289,9 +289,9 @@ int main(int argc, char *argv[]) {
         All_Instrs[inst.byte1] = inst;
     }
 
-    buffer code_buffer = {.buffer = &file_buffer, .size = 256};
-    char out_buffer[2048];
-    buffer asm_buffer = {.buffer = &out_buffer, .size = 1024 };
+    buffer code_buffer = {.buffer = &file_buffer, .size = ARRAY_SIZE(file_buffer)};
+    char out_buffer[4096];
+    buffer asm_buffer = {.buffer = &out_buffer, .size = ARRAY_SIZE(out_buffer) };
     asm_buffer.index = sprintf(asm_buffer.buffer, ";;From file: %s\nbits 16\n", filename);
 
     int i = 0;
@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("ASM File:\n%s", (char*)asm_buffer.buffer);
+    printf("ASM File: Index: %d \n%s", asm_buffer.index, (char*)asm_buffer.buffer);
     FILE *out = fopen(fileout, "w");
     if (!out) {
         fprintf(stderr, "Error opening ASM OUT file.\n");
