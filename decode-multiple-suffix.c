@@ -208,6 +208,7 @@ void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
         dst = tmp;
     }
 
+    printf("MOD_REG_RM: [%d, hex: %x]\n", byte.byte, byte.byte);
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
 }
 
@@ -244,7 +245,7 @@ void AccInstr(byte1 byte, buffer *code_buffer, buffer *asm_buffer) {
         char *instr_name = Instr_Names[instr.name];
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %hd\n", instr_name, dst, data);
     }
-    printf("ACC Command: %s\n", command);
+    printf("ACC: [%d, hex: %x]\n", byte.byte, byte.byte);
 }
 
 int main(int argc, char *argv[]) {
@@ -313,7 +314,7 @@ int main(int argc, char *argv[]) {
                     disp = U8ToI16(disp_hi, disp_lo);
                 }
 
-                char mem_addr[16] = {};
+                char mem_addr[32] = {};
                 if (byte2.mod == MOD_MEM) {
                     if (mem_mode_16bit_disp) {
                         sprintf(mem_addr, "[%hd]", disp);
@@ -324,7 +325,7 @@ int main(int argc, char *argv[]) {
                     sprintf(mem_addr, "[%s + %hd]", rm, disp);
                 }
 
-                char *dst = (byte2.mod == MOD_REG) ? rm : mem_addr;
+                char *dst = mem_addr;
 
                 u8 data_lo = PopFromBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
@@ -337,10 +338,12 @@ int main(int argc, char *argv[]) {
 
                 char data_str[16] = {};
                 if (byte2.mod == MOD_REG) {
+                    dst = rm;
                     sprintf(data_str, "%hd",  data);
                 } else {
                     sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data);
                 }
+                printf("BYTE2: [%d, hex: %x]\n", byte.byte, byte.byte);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, dst, data_str);
 
                 break;
