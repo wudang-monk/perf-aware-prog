@@ -169,63 +169,49 @@ void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
     char command[16] = {};
     op_and_type instr = All_Instrs[byte.byte];
     char *instr_name = Instr_Names[instr.name];
-    switch(byte2.mod) {
-        case MOD_MEM:
-        case MOD_MEM_8:
-        case MOD_MEM_16: {
-            char *rm = rm_mem_table[byte2.rm];
-            char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
-            char mem_addr[16] = {};
-            i16 disp = 0;
-            u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM & byte2.rm == 0b110) ? 1 : 0;
+    char *rm = rm_mem_table[byte2.rm];
+    char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
 
-            if (byte2.mod == MOD_MEM_8) {
-                i8 disp_lo = PopFromBuffer(code_buffer);
-                disp = (i16)disp_lo;
-            } else if ((mem_mode_16bit_disp) || (byte2.mod == MOD_MEM_16)) {
-                u8 disp_lo = PopFromBuffer(code_buffer);
-                u8 disp_hi = PopFromBuffer(code_buffer);
-                disp = U8ToI16(disp_hi, disp_lo);
-            }
-
-            if (byte2.mod == MOD_MEM) {
-                sprintf(mem_addr, "[%s]", rm);
-            } else {
-                sprintf(mem_addr, "[%s + %hd]", rm, disp);
-            }
-            char *src = reg;
-            char *dst = mem_addr;
-
-            if (mem_mode_16bit_disp) {
-                sprintf(command, "%s %s, [%hd]", instr_name, reg, disp);
-            } else {
-                if (byte.d) {
-                    char *tmp = src;
-                    src = dst;
-                    dst = tmp;
-                }
-                sprintf(command, "%s %s, %s", instr_name, dst, src);
-            if (byte.d) {
-                char *tmp = src;
-                src = dst;
-                dst = tmp;
-            }
-
-            asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
-
-
-            printf("MOD REG R/M: Command: %s\n", command);
-            break;
-        }
-        case MOD_REG: {
-            char *rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
-            char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
-            asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, rm, reg);
-            printf("MOD REG RM: REGISTER MODE: %s", command);
-            /* printf("MOD Register mode: NOT Implemented\n"); */
-            break;
-        }
+    if (byte2.mod == MOD_REG) {
+        rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
+        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, rm, reg);
+        return;
     }
+
+    char mem_addr[16] = {};
+    i16 disp = 0;
+    u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM & byte2.rm == 0b110) ? 1 : 0;
+
+    if (byte2.mod == MOD_MEM_8) {
+        i8 disp_lo = PopFromBuffer(code_buffer);
+        disp = (i16)disp_lo;
+    } else if ((mem_mode_16bit_disp) || (byte2.mod == MOD_MEM_16)) {
+        u8 disp_lo = PopFromBuffer(code_buffer);
+        u8 disp_hi = PopFromBuffer(code_buffer);
+        disp = U8ToI16(disp_hi, disp_lo);
+    }
+
+    if (byte2.mod == MOD_MEM) {
+        if (mem_mode_16bit_disp) {
+            sprintf(mem_addr, "[%hd]", disp);
+        } else {
+            sprintf(mem_addr, "[%s]", rm);
+        }
+    } else {
+        sprintf(mem_addr, "[%s + %hd]", rm, disp);
+    }
+    char *src = reg;
+    char *dst = mem_addr;
+
+    if (byte.d) {
+        char *tmp = src;
+        src = dst;
+        dst = tmp;
+    }
+
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+
+    printf("MOD REG R/M: Command: %s\n", command);
 }
 
 void AccInstr(byte1 byte, buffer *code_buffer, buffer *asm_buffer) {
