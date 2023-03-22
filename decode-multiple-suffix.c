@@ -164,7 +164,7 @@ u8 PopFromBuffer(buffer *buff) {
     return result;
 }
 
-void ModRegRm(byte1 byte, buffer *code_buffer) {
+void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
     mod_reg_rm byte2 = {.byte = PopFromBuffer(code_buffer)};
     char command[16] = {};
     op_and_type instr = All_Instrs[byte.byte];
@@ -205,20 +205,30 @@ void ModRegRm(byte1 byte, buffer *code_buffer) {
                     dst = tmp;
                 }
                 sprintf(command, "%s %s, %s", instr_name, dst, src);
+            if (byte.d) {
+                char *tmp = src;
+                src = dst;
+                dst = tmp;
             }
+
+            asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+
+
             printf("MOD REG R/M: Command: %s\n", command);
             break;
         }
         case MOD_REG: {
-            char *rm = rm_mem_table[byte2.rm];
+            char *rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
             char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
-            printf("MOD Register mode: NOT Implemented\n");
+            asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, rm, reg);
+            printf("MOD REG RM: REGISTER MODE: %s", command);
+            /* printf("MOD Register mode: NOT Implemented\n"); */
             break;
         }
     }
 }
 
-void AccInstr(byte1 byte, buffer *code_buffer) {
+void AccInstr(byte1 byte, buffer *code_buffer, buffer *asm_buffer) {
     /* u8 wide = byte1 & 0b00000001; */
     op_and_type instr = All_Instrs[byte.byte];
     char *dst = "al";
@@ -239,7 +249,7 @@ void AccInstr(byte1 byte, buffer *code_buffer) {
             dst = src;
             src = tmp;
         }
-        sprintf(command, "mov %s, %s", dst, src);
+        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "mov %s, %s\n", dst, src);
 
     } else {
         if (byte.w) {
@@ -249,7 +259,7 @@ void AccInstr(byte1 byte, buffer *code_buffer) {
         }
 
         char *instr_name = Instr_Names[instr.name];
-        sprintf(command, "%s %s, %hd", instr_name, dst, data);
+        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %hd\n", instr_name, dst, data);
     }
     printf("ACC Command: %s\n", command);
 }
@@ -280,9 +290,9 @@ int main(int argc, char *argv[]) {
     }
 
     buffer code_buffer = {.buffer = &file_buffer, .size = 256};
-    char out_buffer[1024];
+    char out_buffer[2048];
     buffer asm_buffer = {.buffer = &out_buffer, .size = 1024 };
-    asm_buffer.index = sprintf(out_buffer, ";;From file: %s\nbits 16\n", filename);
+    asm_buffer.index = sprintf(asm_buffer.buffer, ";;From file: %s\nbits 16\n", filename);
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
@@ -291,11 +301,11 @@ int main(int argc, char *argv[]) {
         op_and_type instr = All_Instrs[byte.byte];
         switch(instr.type) {
             case ACC: {
-                AccInstr(byte, &code_buffer);
+                AccInstr(byte, &code_buffer, &asm_buffer);
                 break;
             }
             case M_R_RM: {
-                ModRegRm(byte, &code_buffer);
+                ModRegRm(byte, &code_buffer, &asm_buffer);
                 break;
             }
             case BYTE2: {
@@ -329,13 +339,13 @@ int main(int argc, char *argv[]) {
                 i16 data = (i8)data_lo;
                 char *data_size = (byte.w) ? "word" : "byte";
                 if (byte.d) {
-                    printf("MEM Sign extend 8-bit\n");
+                    /* printf("MEM Sign extend 8-bit\n"); */
                 } else if (byte.w) {
                     u8 data_hi = PopFromBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
                 }
 
-                sprintf(command, "%s %s, %s %hd", instr_name, dst, data_size, data);
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s %hd\n", instr_name, dst, data_size, data);
 
                 printf("BYTE2 Command: %s\n", command);
                 break;
@@ -347,15 +357,15 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* printf("ASM File:\n%s", out_buffer); */
-    /* FILE *out = fopen(fileout, "w"); */
-    /* if (!out) { */
-    /*     fprintf(stderr, "Error opening ASM OUT file.\n"); */
-    /*     return 1; */
-    /* } */
+    printf("ASM File:\n%s", (char*)asm_buffer.buffer);
+    FILE *out = fopen(fileout, "w");
+    if (!out) {
+        fprintf(stderr, "Error opening ASM OUT file.\n");
+        return 1;
+    }
 
-    /* fprintf(out, "%s", (char*)asm_buffer.buffer); */
-    /* fclose(out); */
+    fprintf(out, "%s", (char*)asm_buffer.buffer);
+    fclose(out);
 
     return 0;
 }
