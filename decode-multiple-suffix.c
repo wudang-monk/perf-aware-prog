@@ -166,7 +166,6 @@ u8 PopFromBuffer(buffer *buff) {
 
 void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
     mod_reg_rm byte2 = {.byte = PopFromBuffer(code_buffer)};
-    char command[16] = {};
     op_and_type instr = All_Instrs[byte.byte];
     char *instr_name = Instr_Names[instr.name];
     char *rm = rm_mem_table[byte2.rm];
@@ -210,8 +209,6 @@ void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
     }
 
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
-
-    printf("MOD REG R/M: Command: %s\n", command);
 }
 
 void AccInstr(byte1 byte, buffer *code_buffer, buffer *asm_buffer) {
@@ -300,30 +297,37 @@ int main(int argc, char *argv[]) {
                 char *rm = rm_mem_table[byte2.rm];
                 if (byte2.mod == MOD_REG) {
                     rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
+                    /* asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, rm, reg); */
+                    /* break; */
                 }
 
-                char mem_addr[16] = {};
                 i16 disp = 0;
+                u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
 
                 if (byte2.mod == MOD_MEM_8) {
                     i8 disp_lo = PopFromBuffer(&code_buffer);
                     disp = (i16)disp_lo;
-                } else if (byte2.mod == MOD_MEM_16) {
+                } else if ((mem_mode_16bit_disp) || byte2.mod == MOD_MEM_16) {
                     u8 disp_lo = PopFromBuffer(&code_buffer);
                     u8 disp_hi = PopFromBuffer(&code_buffer);
                     disp = U8ToI16(disp_hi, disp_lo);
                 }
 
+                char mem_addr[16] = {};
                 if (byte2.mod == MOD_MEM) {
-                    sprintf(mem_addr, "[%s]", rm);
+                    if (mem_mode_16bit_disp) {
+                        sprintf(mem_addr, "[%hd]", disp);
+                    } else {
+                        sprintf(mem_addr, "[%s]", rm);
+                    }
                 } else {
                     sprintf(mem_addr, "[%s + %hd]", rm, disp);
                 }
+
                 char *dst = (byte2.mod == MOD_REG) ? rm : mem_addr;
 
                 u8 data_lo = PopFromBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
-                char *data_size = (byte.w) ? "word" : "byte";
                 if (byte.d) {
                     /* printf("MEM Sign extend 8-bit\n"); */
                 } else if (byte.w) {
@@ -331,9 +335,14 @@ int main(int argc, char *argv[]) {
                     data = U8ToI16(data_hi, data_lo);
                 }
 
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s %hd\n", instr_name, dst, data_size, data);
+                char data_str[16] = {};
+                if (byte2.mod == MOD_REG) {
+                    sprintf(data_str, "%hd",  data);
+                } else {
+                    sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data);
+                }
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, dst, data_str);
 
-                printf("BYTE2 Command: %s\n", command);
                 break;
             }
             default: {
