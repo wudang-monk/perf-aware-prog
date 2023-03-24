@@ -22,7 +22,8 @@ I_ACC = 1,
 I_BYTE2 = 2,
 I_M_R_RM = 3,
 I_MOV = 4,
-I_JUMP = 5
+I_JUMP = 5,
+I_LOOP = 6
 }inst_type;
 
 typedef enum {
@@ -99,6 +100,7 @@ char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
+char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 
 op_and_type Handled_Instrs[] = {
 {0x0, ADD, I_M_R_RM},
@@ -165,7 +167,12 @@ op_and_type Handled_Instrs[] = {
 {0xBE, MOV, I_MOV},
 {0xBF, MOV, I_MOV},
 {0xC6, MOV, I_BYTE2},
-{0xC7, MOV, I_BYTE2}
+{0xC7, MOV, I_BYTE2},
+{0xE0, MOV, I_LOOP},
+{0xE1, MOV, I_LOOP},
+{0xE2, MOV, I_LOOP},
+{0xE3, MOV, I_LOOP}
+
 };
 
 op_and_type All_Instrs[256] = {};
@@ -364,6 +371,14 @@ int main(int argc, char *argv[]) {
                 printf("BYTE2: [%d, hex: %x]\n", byte.byte, byte.byte);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, dst, data_str);
 
+                break;
+            }
+            case I_LOOP:
+            case I_JUMP: {
+                u8 inst_type = byte.byte & 0b00001111;
+                char *instr_name = (instr.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
+                i8 inc_8 = PopFromBuffer(&code_buffer);
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, inc_8);
                 break;
             }
             default: {
