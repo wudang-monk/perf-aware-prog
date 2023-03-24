@@ -18,10 +18,11 @@ MOD_REG = 0b11
 }mod;
 
 typedef enum {
-ACC = 1,
-BYTE2 = 2,
-M_R_RM = 3,
-MOV_I = 4
+I_ACC = 1,
+I_BYTE2 = 2,
+I_M_R_RM = 3,
+I_MOV = 4,
+I_JUMP = 5
 }inst_type;
 
 typedef enum {
@@ -34,7 +35,8 @@ SUB = 5,
 /* XOR, */
 CMP = 7,
 MOV = 8,
-ANY = 9
+ANY = 9,
+JMP = 10
 }op_type;
 
 typedef union {
@@ -96,58 +98,74 @@ char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
-
+char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 
 op_and_type Handled_Instrs[] = {
-{0x0, ADD, M_R_RM},
-{0x1, ADD, M_R_RM},
-{0x2, ADD, M_R_RM},
-{0x3, ADD, M_R_RM},
-{0x4, ADD, ACC},
-{0x5, ADD, ACC},
-{0x28, SUB, M_R_RM},
-{0x29, SUB, M_R_RM},
-{0x2A, SUB, M_R_RM},
-{0x2B, SUB, M_R_RM},
-{0x2C, SUB,ACC},
-{0x2D, SUB,ACC},
-{0x38, CMP, M_R_RM},
-{0x39, CMP, M_R_RM},
-{0x3A, CMP, M_R_RM},
-{0x3B, CMP, M_R_RM},
-{0x3C, CMP, ACC},
-{0x3D, CMP, ACC},
-{0x80, ANY, BYTE2},
-{0x81, ANY, BYTE2},
-{0x82, ANY, BYTE2},
-{0x83, ANY, BYTE2},
-{0x88, MOV, M_R_RM},
-{0x89, MOV, M_R_RM},
-{0x8A, MOV, M_R_RM},
-{0x8B, MOV, M_R_RM},
-{0x8C, MOV, ACC},
-{0xA0, MOV, ACC},
-{0xA1, MOV, ACC},
-{0xA2, MOV, ACC},
-{0xA3, MOV, ACC},
-{0xB0, MOV, MOV_I},
-{0xB1, MOV, MOV_I},
-{0xB2, MOV, MOV_I},
-{0xB3, MOV, MOV_I},
-{0xB4, MOV, MOV_I},
-{0xB5, MOV, MOV_I},
-{0xB6, MOV, MOV_I},
-{0xB7, MOV, MOV_I},
-{0xB8, MOV, MOV_I},
-{0xB9, MOV, MOV_I},
-{0xBA, MOV, MOV_I},
-{0xBB, MOV, MOV_I},
-{0xBC, MOV, MOV_I},
-{0xBD, MOV, MOV_I},
-{0xBE, MOV, MOV_I},
-{0xBF, MOV, MOV_I},
-{0xC6, MOV, BYTE2},
-{0xC7, MOV, BYTE2}
+{0x0, ADD, I_M_R_RM},
+{0x1, ADD, I_M_R_RM},
+{0x2, ADD, I_M_R_RM},
+{0x3, ADD, I_M_R_RM},
+{0x4, ADD, I_ACC},
+{0x5, ADD, I_ACC},
+{0x28, SUB, I_M_R_RM},
+{0x29, SUB, I_M_R_RM},
+{0x2A, SUB, I_M_R_RM},
+{0x2B, SUB, I_M_R_RM},
+{0x2C, SUB,I_ACC},
+{0x2D, SUB,I_ACC},
+{0x38, CMP, I_M_R_RM},
+{0x39, CMP, I_M_R_RM},
+{0x3A, CMP, I_M_R_RM},
+{0x3B, CMP, I_M_R_RM},
+{0x3C, CMP, I_ACC},
+{0x3D, CMP, I_ACC},
+{0x70, JMP, I_JUMP},
+{0x71, JMP, I_JUMP},
+{0x72, JMP, I_JUMP},
+{0x73, JMP, I_JUMP},
+{0x74, JMP, I_JUMP},
+{0x75, JMP, I_JUMP},
+{0x76, JMP, I_JUMP},
+{0x77, JMP, I_JUMP},
+{0x78, JMP, I_JUMP},
+{0x79, JMP, I_JUMP},
+{0x7A, JMP, I_JUMP},
+{0x7B, JMP, I_JUMP},
+{0x7C, JMP, I_JUMP},
+{0x7D, JMP, I_JUMP},
+{0x7E, JMP, I_JUMP},
+{0x7F, JMP, I_JUMP},
+{0x80, ANY, I_BYTE2},
+{0x81, ANY, I_BYTE2},
+{0x82, ANY, I_BYTE2},
+{0x83, ANY, I_BYTE2},
+{0x88, MOV, I_M_R_RM},
+{0x89, MOV, I_M_R_RM},
+{0x8A, MOV, I_M_R_RM},
+{0x8B, MOV, I_M_R_RM},
+{0x8C, MOV, I_ACC},
+{0xA0, MOV, I_ACC},
+{0xA1, MOV, I_ACC},
+{0xA2, MOV, I_ACC},
+{0xA3, MOV, I_ACC},
+{0xB0, MOV, I_MOV},
+{0xB1, MOV, I_MOV},
+{0xB2, MOV, I_MOV},
+{0xB3, MOV, I_MOV},
+{0xB4, MOV, I_MOV},
+{0xB5, MOV, I_MOV},
+{0xB6, MOV, I_MOV},
+{0xB7, MOV, I_MOV},
+{0xB8, MOV, I_MOV},
+{0xB9, MOV, I_MOV},
+{0xBA, MOV, I_MOV},
+{0xBB, MOV, I_MOV},
+{0xBC, MOV, I_MOV},
+{0xBD, MOV, I_MOV},
+{0xBE, MOV, I_MOV},
+{0xBF, MOV, I_MOV},
+{0xC6, MOV, I_BYTE2},
+{0xC7, MOV, I_BYTE2}
 };
 
 op_and_type All_Instrs[256] = {};
@@ -284,15 +302,15 @@ int main(int argc, char *argv[]) {
         char command[32] = {};
         op_and_type instr = All_Instrs[byte.byte];
         switch(instr.type) {
-            case ACC: {
+            case I_ACC: {
                 AccInstr(byte, &code_buffer, &asm_buffer);
                 break;
             }
-            case M_R_RM: {
+            case I_M_R_RM: {
                 ModRegRm(byte, &code_buffer, &asm_buffer);
                 break;
             }
-            case BYTE2: {
+            case I_BYTE2: {
                 mod_reg_rm byte2 = {.byte = PopFromBuffer(&code_buffer)};
                 char *instr_name = Instr_Names[byte2.reg];
                 char *rm = rm_mem_table[byte2.rm];
