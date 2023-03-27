@@ -360,8 +360,18 @@ int main(int argc, char *argv[]) {
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, inc_8);
                 break;
             }
-            default: {
-                printf("OP: %d, %x, NOT handled\n", byte.byte, byte.byte);
+            case I_MOV: {
+                u8 wide = (byte.byte >> 3) & 0b00001;
+                u8 reg = byte.byte & 0b00000111;
+                char *dst = (wide) ? word_registers[reg] : byte_registers[reg];
+                u8 data_lo = PopFromBuffer(&code_buffer);
+                i16 data = (i8)data_lo;
+                if (wide) {
+                    u8 data_hi = PopFromBuffer(&code_buffer);
+                    data = U8ToI16(data_hi, data_lo);
+                }
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", dst, data);
+                printf("MOV: %s, %hd", dst, data);
                 break;
             }
         }
