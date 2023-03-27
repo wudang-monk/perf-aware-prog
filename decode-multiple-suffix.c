@@ -297,12 +297,23 @@ int main(int argc, char *argv[]) {
             case I_BYTE2: {
                 b2 byte2 = {.byte = PopBuffer(&code_buffer)};
                 char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
-                char *rm = rm_mem_table[byte2.rm];
+                char *rm;
+                u8 data_lo;
+                i16 data = 0;
                 if (byte2.mod == MOD_REG) {
+                    data_lo = PopBuffer(&code_buffer);
+                    data = (i8)data_lo;
                     rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
-                    /* asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, rm, reg); */
-                    /* break; */
+                    if (byte.w && instr.bytes_used == 5) {
+                        u8 data_hi = PopBuffer(&code_buffer);
+                        data = U8ToI16(data_hi, data_lo);
+                    }
+                    
+                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %hd\n", instr_name, rm, data);
+                    break;
                 }
+
+                rm = rm_mem_table[byte2.rm];
 
                 i16 disp = 0;
                 u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
@@ -317,32 +328,26 @@ int main(int argc, char *argv[]) {
                 }
 
                 char mem_addr[32] = {};
+                sprintf(mem_addr, "[%s + %hd]", rm, disp);
                 if (byte2.mod == MOD_MEM) {
+                    sprintf(mem_addr, "[%s]", rm);
                     if (mem_mode_16bit_disp) {
                         sprintf(mem_addr, "[%hd]", disp);
-                    } else {
-                        sprintf(mem_addr, "[%s]", rm);
-                    }
-                } else {
-                    sprintf(mem_addr, "[%s + %hd]", rm, disp);
+                    } 
                 }
 
                 char *dst = mem_addr;
+                data_lo = PopBuffer(&code_buffer);
+                data = (i8)data_lo;
 
-                u8 data_lo = PopBuffer(&code_buffer);
-                i16 data = (i8)data_lo;
                 if (byte.w && instr.bytes_used == 5) {
                     u8 data_hi = PopBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
                 }
 
                 char data_str[16] = {};
-                if (byte2.mod == MOD_REG) {
-                    dst = rm;
-                    sprintf(data_str, "%hd",  data);
-                } else {
-                    sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data);
-                }
+                sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data);
+                
                 printf("BYTE2: [%d, hex: %x]\n", byte.byte, byte.byte);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, dst, data_str);
 
