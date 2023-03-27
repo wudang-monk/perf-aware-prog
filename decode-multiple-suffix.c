@@ -26,6 +26,7 @@ I_JUMP = 5,
 I_LOOP = 6
 }inst_type;
 
+// (NOTE) these enums are currently only used for mod reg r/m functions that do not encode the instruction in the reg field
 typedef enum {
 ADD = 0,
 /* OR, */
@@ -47,10 +48,10 @@ typedef union {
         mod mod: 2;
     };
     u8 byte;
-}mod_reg_rm;
+}b2;
 
 typedef struct {
-    u8 byte1;
+    u8 b1;
     op_type name;
     inst_type type;
 }op_and_type;
@@ -62,32 +63,32 @@ typedef union {
         u8 opcode: 6;
     };
     u8 byte;
-}byte1;
+}b1;
 
-typedef union {
-    struct {
-        u16 w : 1;
-        u16 d : 1;
-        u16 opcode: 6;
-        u16 rm: 3;
-        u16 reg: 3;
-        u16 mod: 2;
-    };
-    struct {
-        u8 byte1;
-        u8 byte2;
-    };
-    u8 bytes[2];
-}reg_reg;
+/* typedef union { */
+/*     struct { */
+/*         u16 w : 1; */
+/*         u16 d : 1; */
+/*         u16 opcode: 6; */
+/*         u16 rm: 3; */
+/*         u16 reg: 3; */
+/*         u16 mod: 2; */
+/*     }; */
+/*     struct { */
+/*         u8 b1; */
+/*         u8 byte2; */
+/*     }; */
+/*     u8 bytes[2]; */
+/* }reg_reg; */
 
-typedef union {
-    struct {
-        u8 reg : 3;
-        u8 w: 1;
-        u8 op_code: 4;
-    };
-    u8 byte;
-}im_reg;
+/* typedef union { */
+/*     struct { */
+/*         u8 reg : 3; */
+/*         u8 w: 1; */
+/*         u8 op_code: 4; */
+/*     }; */
+/*     u8 byte; */
+/* }im_reg; */
 
 typedef struct {
     void *buffer;
@@ -168,10 +169,10 @@ op_and_type Handled_Instrs[] = {
 {0xBF, MOV, I_MOV},
 {0xC6, MOV, I_BYTE2},
 {0xC7, MOV, I_BYTE2},
-{0xE0, MOV, I_LOOP},
-{0xE1, MOV, I_LOOP},
-{0xE2, MOV, I_LOOP},
-{0xE3, MOV, I_LOOP}
+{0xE0, ANY, I_LOOP},
+{0xE1, ANY, I_LOOP},
+{0xE2, ANY, I_LOOP},
+{0xE3, ANY, I_LOOP}
 
 };
 
@@ -189,8 +190,8 @@ u8 PopFromBuffer(buffer *buff) {
     return result;
 }
 
-void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
-    mod_reg_rm byte2 = {.byte = PopFromBuffer(code_buffer)};
+void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
+    b2 byte2 = {.byte = PopFromBuffer(code_buffer)};
     op_and_type instr = All_Instrs[byte.byte];
     char *instr_name = Instr_Names[instr.name];
     char *rm = rm_mem_table[byte2.rm];
@@ -237,39 +238,19 @@ void ModRegRm(byte1 byte, buffer *code_buffer, buffer* asm_buffer) {
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
 }
 
-void AccInstr(byte1 byte, buffer *code_buffer, buffer *asm_buffer) {
-    /* u8 wide = byte1 & 0b00000001; */
+void AccInstr(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     op_and_type instr = All_Instrs[byte.byte];
-    char *dst = "al";
+    char *dst = (byte.w) ? "ax" : "al";
     u8 data_lo = PopFromBuffer(code_buffer);
     i16 data = (i8)data_lo;
+    char *instr_name = Instr_Names[instr.name];
     char command[16] = {};
-
-    if (instr.name == MOV) {
+    if (byte.w) {
         u8 data_hi = PopFromBuffer(code_buffer);
         data = U8ToI16(data_hi, data_lo);
-        char mem_addr[8] = {};
-        sprintf(mem_addr, "[%hd]", data);
-        char *src = mem_addr;
-        /* u8 reverse = byte1 & 0b00000010; */
-
-        if (byte.d) {
-            char *tmp = dst;
-            dst = src;
-            src = tmp;
-        }
-        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "mov %s, %s\n", dst, src);
-
-    } else {
-        if (byte.w) {
-            dst = "ax";
-            u8 data_hi = PopFromBuffer(code_buffer);
-            data = U8ToI16(data_hi, data_lo);
-        }
-
-        char *instr_name = Instr_Names[instr.name];
-        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %hd\n", instr_name, dst, data);
     }
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %hd\n", instr_name, dst, data);
+
     printf("ACC: [%d, hex: %x]\n", byte.byte, byte.byte);
 }
 
@@ -295,7 +276,7 @@ int main(int argc, char *argv[]) {
     fclose(fp);
     for (int i = 0; i < ARRAY_SIZE(Handled_Instrs); i++) {
         op_and_type inst = Handled_Instrs[i];
-        All_Instrs[inst.byte1] = inst;
+        All_Instrs[inst.b1] = inst;
     }
 
     buffer code_buffer = {.buffer = &file_buffer, .size = ARRAY_SIZE(file_buffer)};
@@ -305,7 +286,7 @@ int main(int argc, char *argv[]) {
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
-        byte1 byte = {.byte = PopFromBuffer(&code_buffer)};
+        b1 byte = {.byte = PopFromBuffer(&code_buffer)};
         char command[32] = {};
         op_and_type instr = All_Instrs[byte.byte];
         switch(instr.type) {
@@ -318,8 +299,8 @@ int main(int argc, char *argv[]) {
                 break;
             }
             case I_BYTE2: {
-                mod_reg_rm byte2 = {.byte = PopFromBuffer(&code_buffer)};
-                char *instr_name = Instr_Names[byte2.reg];
+                b2 byte2 = {.byte = PopFromBuffer(&code_buffer)};
+                char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
                 char *rm = rm_mem_table[byte2.rm];
                 if (byte2.mod == MOD_REG) {
                     rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
@@ -354,9 +335,7 @@ int main(int argc, char *argv[]) {
 
                 u8 data_lo = PopFromBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
-                if (byte.d) {
-                    /* printf("MEM Sign extend 8-bit\n"); */
-                } else if (byte.w) {
+                if (byte.w) {
                     u8 data_hi = PopFromBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
                 }
