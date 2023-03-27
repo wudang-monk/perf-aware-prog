@@ -26,6 +26,7 @@ I_JUMP = 5,
 I_LOOP = 6
 }inst_type;
 
+
 // (NOTE) these enums are currently only used for mod reg r/m functions that do not encode the instruction in the reg field
 typedef enum {
 ADD = 0,
@@ -54,7 +55,8 @@ typedef struct {
     u8 b1;
     op_type name;
     inst_type type;
-}op_and_type;
+    u8 bytes_used;
+}instr;
 
 typedef union {
     struct {
@@ -64,31 +66,6 @@ typedef union {
     };
     u8 byte;
 }b1;
-
-/* typedef union { */
-/*     struct { */
-/*         u16 w : 1; */
-/*         u16 d : 1; */
-/*         u16 opcode: 6; */
-/*         u16 rm: 3; */
-/*         u16 reg: 3; */
-/*         u16 mod: 2; */
-/*     }; */
-/*     struct { */
-/*         u8 b1; */
-/*         u8 byte2; */
-/*     }; */
-/*     u8 bytes[2]; */
-/* }reg_reg; */
-
-/* typedef union { */
-/*     struct { */
-/*         u8 reg : 3; */
-/*         u8 w: 1; */
-/*         u8 op_code: 4; */
-/*     }; */
-/*     u8 byte; */
-/* }im_reg; */
 
 typedef struct {
     void *buffer;
@@ -103,25 +80,25 @@ char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "m
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 
-op_and_type Handled_Instrs[] = {
-{0x0, ADD, I_M_R_RM},
-{0x1, ADD, I_M_R_RM},
-{0x2, ADD, I_M_R_RM},
-{0x3, ADD, I_M_R_RM},
-{0x4, ADD, I_ACC},
-{0x5, ADD, I_ACC},
-{0x28, SUB, I_M_R_RM},
-{0x29, SUB, I_M_R_RM},
-{0x2A, SUB, I_M_R_RM},
-{0x2B, SUB, I_M_R_RM},
-{0x2C, SUB,I_ACC},
-{0x2D, SUB,I_ACC},
-{0x38, CMP, I_M_R_RM},
-{0x39, CMP, I_M_R_RM},
-{0x3A, CMP, I_M_R_RM},
-{0x3B, CMP, I_M_R_RM},
-{0x3C, CMP, I_ACC},
-{0x3D, CMP, I_ACC},
+instr Handled_Instrs[] = {
+{0x0, ADD, I_M_R_RM, 3},
+{0x1, ADD, I_M_R_RM, 3},
+{0x2, ADD, I_M_R_RM, 3},
+{0x3, ADD, I_M_R_RM, 3},
+{0x4, ADD, I_ACC, 1},
+{0x5, ADD, I_ACC, 2},
+{0x28, SUB, I_M_R_RM, 3},
+{0x29, SUB, I_M_R_RM, 3},
+{0x2A, SUB, I_M_R_RM, 3},
+{0x2B, SUB, I_M_R_RM, 3},
+{0x2C, SUB,I_ACC, 1},
+{0x2D, SUB,I_ACC, 2},
+{0x38, CMP, I_M_R_RM, 3},
+{0x39, CMP, I_M_R_RM, 3},
+{0x3A, CMP, I_M_R_RM, 3},
+{0x3B, CMP, I_M_R_RM, 3},
+{0x3C, CMP, I_ACC, 1},
+{0x3D, CMP, I_ACC, 2},
 {0x70, JMP, I_JUMP},
 {0x71, JMP, I_JUMP},
 {0x72, JMP, I_JUMP},
@@ -138,45 +115,45 @@ op_and_type Handled_Instrs[] = {
 {0x7D, JMP, I_JUMP},
 {0x7E, JMP, I_JUMP},
 {0x7F, JMP, I_JUMP},
-{0x80, ANY, I_BYTE2},
-{0x81, ANY, I_BYTE2},
-{0x82, ANY, I_BYTE2},
-{0x83, ANY, I_BYTE2},
-{0x88, MOV, I_M_R_RM},
-{0x89, MOV, I_M_R_RM},
-{0x8A, MOV, I_M_R_RM},
-{0x8B, MOV, I_M_R_RM},
-{0x8C, MOV, I_ACC},
-{0xA0, MOV, I_ACC},
-{0xA1, MOV, I_ACC},
-{0xA2, MOV, I_ACC},
-{0xA3, MOV, I_ACC},
-{0xB0, MOV, I_MOV},
-{0xB1, MOV, I_MOV},
-{0xB2, MOV, I_MOV},
-{0xB3, MOV, I_MOV},
-{0xB4, MOV, I_MOV},
-{0xB5, MOV, I_MOV},
-{0xB6, MOV, I_MOV},
-{0xB7, MOV, I_MOV},
-{0xB8, MOV, I_MOV},
-{0xB9, MOV, I_MOV},
-{0xBA, MOV, I_MOV},
-{0xBB, MOV, I_MOV},
-{0xBC, MOV, I_MOV},
-{0xBD, MOV, I_MOV},
-{0xBE, MOV, I_MOV},
-{0xBF, MOV, I_MOV},
-{0xC6, MOV, I_BYTE2},
-{0xC7, MOV, I_BYTE2},
-{0xE0, ANY, I_LOOP},
-{0xE1, ANY, I_LOOP},
-{0xE2, ANY, I_LOOP},
-{0xE3, ANY, I_LOOP}
+{0x80, ANY, I_BYTE2, 4},
+{0x81, ANY, I_BYTE2, 5},
+{0x82, ANY, I_BYTE2, 4},
+{0x83, ANY, I_BYTE2, 4},
+{0x88, MOV, I_M_R_RM, 3},
+{0x89, MOV, I_M_R_RM, 3},
+{0x8A, MOV, I_M_R_RM, 3},
+{0x8B, MOV, I_M_R_RM, 3},
+{0x8C, MOV, I_M_R_RM, 3},
+{0xA0, MOV, I_ACC, 2},
+{0xA1, MOV, I_ACC, 2},
+{0xA2, MOV, I_ACC, 2},
+{0xA3, MOV, I_ACC, 2},
+{0xB0, MOV, I_MOV, 1},
+{0xB1, MOV, I_MOV, 1},
+{0xB2, MOV, I_MOV, 1},
+{0xB3, MOV, I_MOV, 1},
+{0xB4, MOV, I_MOV, 1},
+{0xB5, MOV, I_MOV, 1},
+{0xB6, MOV, I_MOV, 1},
+{0xB7, MOV, I_MOV, 1},
+{0xB8, MOV, I_MOV, 2},
+{0xB9, MOV, I_MOV, 2},
+{0xBA, MOV, I_MOV, 2},
+{0xBB, MOV, I_MOV, 2},
+{0xBC, MOV, I_MOV, 2},
+{0xBD, MOV, I_MOV, 2},
+{0xBE, MOV, I_MOV, 2},
+{0xBF, MOV, I_MOV, 2},
+{0xC6, MOV, I_BYTE2, 4},
+{0xC7, MOV, I_BYTE2, 5},
+{0xE0, ANY, I_LOOP, 1},
+{0xE1, ANY, I_LOOP, 1},
+{0xE2, ANY, I_LOOP, 1},
+{0xE3, ANY, I_LOOP, 1}
 
 };
 
-op_and_type All_Instrs[256] = {};
+instr All_Instrs[256] = {};
 
 
 i16 U8ToI16(u8 high, u8 low) {
@@ -184,15 +161,20 @@ i16 U8ToI16(u8 high, u8 low) {
     return result;
 }
 
-u8 PopFromBuffer(buffer *buff) {
+u8 PopBuffer(buffer *buff) {
     u8 result = *(u8*)(buff->buffer + buff->index);
     ++buff->index;
     return result;
 }
 
+/* u8 PeekBuffer(buffer *buff) { */
+/*     u8 result = *(u8*)(buff->buffer + buff->index); */
+/*     return result; */
+/* } */
+
 void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
-    b2 byte2 = {.byte = PopFromBuffer(code_buffer)};
-    op_and_type instr = All_Instrs[byte.byte];
+    b2 byte2 = {.byte = PopBuffer(code_buffer)};
+    instr instr = All_Instrs[byte.byte];
     char *instr_name = Instr_Names[instr.name];
     char *rm = rm_mem_table[byte2.rm];
     char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
@@ -208,11 +190,11 @@ void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
     u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM & byte2.rm == 0b110) ? 1 : 0;
 
     if (byte2.mod == MOD_MEM_8) {
-        i8 disp_lo = PopFromBuffer(code_buffer);
+        i8 disp_lo = PopBuffer(code_buffer);
         disp = (i16)disp_lo;
     } else if ((mem_mode_16bit_disp) || (byte2.mod == MOD_MEM_16)) {
-        u8 disp_lo = PopFromBuffer(code_buffer);
-        u8 disp_hi = PopFromBuffer(code_buffer);
+        u8 disp_lo = PopBuffer(code_buffer);
+        u8 disp_hi = PopBuffer(code_buffer);
         disp = U8ToI16(disp_hi, disp_lo);
     }
 
@@ -239,17 +221,31 @@ void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
 }
 
 void AccInstr(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
-    op_and_type instr = All_Instrs[byte.byte];
+    instr instr = All_Instrs[byte.byte];
     char *dst = (byte.w) ? "ax" : "al";
-    u8 data_lo = PopFromBuffer(code_buffer);
+    u8 data_lo = PopBuffer(code_buffer);
     i16 data = (i8)data_lo;
     char *instr_name = Instr_Names[instr.name];
     char command[16] = {};
-    if (byte.w) {
-        u8 data_hi = PopFromBuffer(code_buffer);
+    // mov instructions always require an address lo/hi
+    if (byte.w || instr.name == MOV) {
+        u8 data_hi = PopBuffer(code_buffer);
         data = U8ToI16(data_hi, data_lo);
     }
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %hd\n", instr_name, dst, data);
+
+    if (instr.name == MOV) {
+        sprintf(command, "[%hd]", data);
+    } else {
+        sprintf(command, "%hd", data);
+    }
+    char *src = command;
+    if (byte.d) {
+        char *tmp = src;
+        src = dst;
+        dst = tmp;
+    }
+    
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
 
     printf("ACC: [%d, hex: %x]\n", byte.byte, byte.byte);
 }
@@ -275,7 +271,7 @@ int main(int argc, char *argv[]) {
 
     fclose(fp);
     for (int i = 0; i < ARRAY_SIZE(Handled_Instrs); i++) {
-        op_and_type inst = Handled_Instrs[i];
+        instr inst = Handled_Instrs[i];
         All_Instrs[inst.b1] = inst;
     }
 
@@ -286,9 +282,9 @@ int main(int argc, char *argv[]) {
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
-        b1 byte = {.byte = PopFromBuffer(&code_buffer)};
+        b1 byte = {.byte = PopBuffer(&code_buffer)};
         char command[32] = {};
-        op_and_type instr = All_Instrs[byte.byte];
+        instr instr = All_Instrs[byte.byte];
         switch(instr.type) {
             case I_ACC: {
                 AccInstr(byte, &code_buffer, &asm_buffer);
@@ -299,7 +295,7 @@ int main(int argc, char *argv[]) {
                 break;
             }
             case I_BYTE2: {
-                b2 byte2 = {.byte = PopFromBuffer(&code_buffer)};
+                b2 byte2 = {.byte = PopBuffer(&code_buffer)};
                 char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
                 char *rm = rm_mem_table[byte2.rm];
                 if (byte2.mod == MOD_REG) {
@@ -312,11 +308,11 @@ int main(int argc, char *argv[]) {
                 u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
 
                 if (byte2.mod == MOD_MEM_8) {
-                    i8 disp_lo = PopFromBuffer(&code_buffer);
+                    i8 disp_lo = PopBuffer(&code_buffer);
                     disp = (i16)disp_lo;
                 } else if ((mem_mode_16bit_disp) || byte2.mod == MOD_MEM_16) {
-                    u8 disp_lo = PopFromBuffer(&code_buffer);
-                    u8 disp_hi = PopFromBuffer(&code_buffer);
+                    u8 disp_lo = PopBuffer(&code_buffer);
+                    u8 disp_hi = PopBuffer(&code_buffer);
                     disp = U8ToI16(disp_hi, disp_lo);
                 }
 
@@ -333,10 +329,10 @@ int main(int argc, char *argv[]) {
 
                 char *dst = mem_addr;
 
-                u8 data_lo = PopFromBuffer(&code_buffer);
+                u8 data_lo = PopBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
-                if (byte.w) {
-                    u8 data_hi = PopFromBuffer(&code_buffer);
+                if (byte.w && instr.bytes_used == 5) {
+                    u8 data_hi = PopBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
                 }
 
@@ -356,7 +352,7 @@ int main(int argc, char *argv[]) {
             case I_JUMP: {
                 u8 inst_type = byte.byte & 0b00001111;
                 char *instr_name = (instr.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
-                i8 inc_8 = PopFromBuffer(&code_buffer);
+                i8 inc_8 = PopBuffer(&code_buffer);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, inc_8);
                 break;
             }
@@ -364,10 +360,10 @@ int main(int argc, char *argv[]) {
                 u8 wide = (byte.byte >> 3) & 0b00001;
                 u8 reg = byte.byte & 0b00000111;
                 char *dst = (wide) ? word_registers[reg] : byte_registers[reg];
-                u8 data_lo = PopFromBuffer(&code_buffer);
+                u8 data_lo = PopBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
                 if (wide) {
-                    u8 data_hi = PopFromBuffer(&code_buffer);
+                    u8 data_hi = PopBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
                 }
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", dst, data);
