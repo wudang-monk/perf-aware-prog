@@ -215,6 +215,63 @@ void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
 }
 
+void IMM_REG_MEM(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
+    b2 byte2 = {.byte = PopBuffer(code_buffer)};
+    instr instr = All_Instrs[byte.byte];
+    char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
+    char *rm = rm_mem_table[byte2.rm];
+    if (byte2.mod == MOD_REG) {
+        u8 data_lo = PopBuffer(code_buffer);
+        i16 data = (i8)data_lo;
+        rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
+        if (byte.w && instr.bytes_used == 5) {
+            u8 data_hi = PopBuffer(code_buffer);
+            data = U8ToI16(data_hi, data_lo);
+        }
+                    
+        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %hd\n", instr_name, rm, data);
+        return;
+    }
+
+    i16 disp = 0;
+    u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
+
+    if (byte2.mod == MOD_MEM_8) {
+        i8 disp_lo = PopBuffer(code_buffer);
+        disp = (i16)disp_lo;
+    } else if ((mem_mode_16bit_disp) || byte2.mod == MOD_MEM_16) {
+        u8 disp_lo = PopBuffer(code_buffer);
+        u8 disp_hi = PopBuffer(code_buffer);
+        disp = U8ToI16(disp_hi, disp_lo);
+    }
+
+    char mem_addr[32] = {};
+    sprintf(mem_addr, "[%s + %hd]", rm, disp);
+    if (byte2.mod == MOD_MEM) {
+        sprintf(mem_addr, "[%s]", rm);
+        if (mem_mode_16bit_disp) {
+            sprintf(mem_addr, "[%hd]", disp);
+        } 
+    }
+
+    char *dst = mem_addr;
+    u8 data_lo = PopBuffer(code_buffer);
+    i16 data = (i8)data_lo;
+
+    if (byte.w && instr.bytes_used == 5) {
+        u8 data_hi = PopBuffer(code_buffer);
+        data = U8ToI16(data_hi, data_lo);
+    }
+
+    char data_str[16] = {};
+    sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data);
+                
+    printf("BYTE2: [%d, hex: %x]\n", byte.byte, byte.byte);
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, data_str);
+
+    return;
+}
+
 void AccInstr(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     instr instr = All_Instrs[byte.byte];
     char *dst = (byte.w) ? "ax" : "al";
@@ -251,7 +308,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     char *filename = argv[1];
-    char *fileout = argv[2] ? argv[2] : "asm_out.asm";
+    char *fileout = argv[2] ? argv[2] : "asm-out/asm_out.asm";
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
         return 1;
@@ -285,66 +342,63 @@ int main(int argc, char *argv[]) {
                 AccInstr(byte, &code_buffer, &asm_buffer);
                 break;
             }
-            case I_M_R_RM: {
+            case I_REG_REGMEM: {
                 ModRegRm(byte, &code_buffer, &asm_buffer);
                 break;
             }
-            case I_BYTE2: {
-                b2 byte2 = {.byte = PopBuffer(&code_buffer)};
-                char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
-                char *rm;
-                u8 data_lo;
-                i16 data = 0;
-                if (byte2.mod == MOD_REG) {
-                    data_lo = PopBuffer(&code_buffer);
-                    data = (i8)data_lo;
-                    rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
-                    if (byte.w && instr.bytes_used == 5) {
-                        u8 data_hi = PopBuffer(&code_buffer);
-                        data = U8ToI16(data_hi, data_lo);
-                    }
-                    
-                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %hd\n", instr_name, rm, data);
-                    break;
-                }
+            case I_IMM_REGMEM: {
+                IMM_REG_MEM(byte, &code_buffer, &asm_buffer);
+                /* b2 byte2 = {.byte = PopBuffer(&code_buffer)}; */
+                /* char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name]; */
+                /* char *rm = rm_mem_table[byte2.rm]; */
+                /* if (byte2.mod == MOD_REG) { */
+                /*     u8 data_lo = PopBuffer(&code_buffer); */
+                /*     i16 data = (i8)data_lo; */
+                /*     rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm]; */
+                /*     if (byte.w && instr.bytes_used == 5) { */
+                /*         u8 data_hi = PopBuffer(&code_buffer); */
+                /*         data = U8ToI16(data_hi, data_lo); */
+                /*     } */
 
-                rm = rm_mem_table[byte2.rm];
+                /*     asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %hd\n", instr_name, rm, data); */
+                /*     break; */
+                /* } */
 
-                i16 disp = 0;
-                u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
+                /* i16 disp = 0; */
+                /* u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0; */
 
-                if (byte2.mod == MOD_MEM_8) {
-                    i8 disp_lo = PopBuffer(&code_buffer);
-                    disp = (i16)disp_lo;
-                } else if ((mem_mode_16bit_disp) || byte2.mod == MOD_MEM_16) {
-                    u8 disp_lo = PopBuffer(&code_buffer);
-                    u8 disp_hi = PopBuffer(&code_buffer);
-                    disp = U8ToI16(disp_hi, disp_lo);
-                }
+                /* if (byte2.mod == MOD_MEM_8) { */
+                /*     i8 disp_lo = PopBuffer(&code_buffer); */
+                /*     disp = (i16)disp_lo; */
+                /* } else if ((mem_mode_16bit_disp) || byte2.mod == MOD_MEM_16) { */
+                /*     u8 disp_lo = PopBuffer(&code_buffer); */
+                /*     u8 disp_hi = PopBuffer(&code_buffer); */
+                /*     disp = U8ToI16(disp_hi, disp_lo); */
+                /* } */
 
-                char mem_addr[32] = {};
-                sprintf(mem_addr, "[%s + %hd]", rm, disp);
-                if (byte2.mod == MOD_MEM) {
-                    sprintf(mem_addr, "[%s]", rm);
-                    if (mem_mode_16bit_disp) {
-                        sprintf(mem_addr, "[%hd]", disp);
-                    } 
-                }
+                /* char mem_addr[32] = {}; */
+                /* sprintf(mem_addr, "[%s + %hd]", rm, disp); */
+                /* if (byte2.mod == MOD_MEM) { */
+                /*     sprintf(mem_addr, "[%s]", rm); */
+                /*     if (mem_mode_16bit_disp) { */
+                /*         sprintf(mem_addr, "[%hd]", disp); */
+                /*     }  */
+                /* } */
 
-                char *dst = mem_addr;
-                data_lo = PopBuffer(&code_buffer);
-                data = (i8)data_lo;
+                /* char *dst = mem_addr; */
+                /* u8 data_lo = PopBuffer(&code_buffer); */
+                /* i16 data = (i8)data_lo; */
 
-                if (byte.w && instr.bytes_used == 5) {
-                    u8 data_hi = PopBuffer(&code_buffer);
-                    data = U8ToI16(data_hi, data_lo);
-                }
+                /* if (byte.w && instr.bytes_used == 5) { */
+                /*     u8 data_hi = PopBuffer(&code_buffer); */
+                /*     data = U8ToI16(data_hi, data_lo); */
+                /* } */
 
-                char data_str[16] = {};
-                sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data);
-                
-                printf("BYTE2: [%d, hex: %x]\n", byte.byte, byte.byte);
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, dst, data_str);
+                /* char data_str[16] = {}; */
+                /* sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data); */
+
+                /* printf("BYTE2: [%d, hex: %x]\n", byte.byte, byte.byte); */
+                /* asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s %s, %s\n", instr_name, dst, data_str); */
 
                 break;
             }
