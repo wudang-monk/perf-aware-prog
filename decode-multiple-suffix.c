@@ -19,8 +19,8 @@ MOD_REG = 0b11
 
 typedef enum {
 I_ACC = 1,
-I_BYTE2 = 2,
-I_M_R_RM = 3,
+I_IMM_REGMEM = 2,
+I_REG_REGMEM = 3,
 I_MOV = 4,
 I_JUMP = 5,
 I_LOOP = 6
@@ -81,22 +81,22 @@ char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js"
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 
 instr Handled_Instrs[] = {
-{0x0, ADD, I_M_R_RM, 3},
-{0x1, ADD, I_M_R_RM, 3},
-{0x2, ADD, I_M_R_RM, 3},
-{0x3, ADD, I_M_R_RM, 3},
+{0x0, ADD, I_REG_REGMEM, 3},
+{0x1, ADD, I_REG_REGMEM, 3},
+{0x2, ADD, I_REG_REGMEM, 3},
+{0x3, ADD, I_REG_REGMEM, 3},
 {0x4, ADD, I_ACC, 1},
 {0x5, ADD, I_ACC, 2},
-{0x28, SUB, I_M_R_RM, 3},
-{0x29, SUB, I_M_R_RM, 3},
-{0x2A, SUB, I_M_R_RM, 3},
-{0x2B, SUB, I_M_R_RM, 3},
+{0x28, SUB, I_REG_REGMEM, 3},
+{0x29, SUB, I_REG_REGMEM, 3},
+{0x2A, SUB, I_REG_REGMEM, 3},
+{0x2B, SUB, I_REG_REGMEM, 3},
 {0x2C, SUB,I_ACC, 1},
 {0x2D, SUB,I_ACC, 2},
-{0x38, CMP, I_M_R_RM, 3},
-{0x39, CMP, I_M_R_RM, 3},
-{0x3A, CMP, I_M_R_RM, 3},
-{0x3B, CMP, I_M_R_RM, 3},
+{0x38, CMP, I_REG_REGMEM, 3},
+{0x39, CMP, I_REG_REGMEM, 3},
+{0x3A, CMP, I_REG_REGMEM, 3},
+{0x3B, CMP, I_REG_REGMEM, 3},
 {0x3C, CMP, I_ACC, 1},
 {0x3D, CMP, I_ACC, 2},
 {0x70, JMP, I_JUMP},
@@ -115,15 +115,15 @@ instr Handled_Instrs[] = {
 {0x7D, JMP, I_JUMP},
 {0x7E, JMP, I_JUMP},
 {0x7F, JMP, I_JUMP},
-{0x80, ANY, I_BYTE2, 4},
-{0x81, ANY, I_BYTE2, 5},
-{0x82, ANY, I_BYTE2, 4},
-{0x83, ANY, I_BYTE2, 4},
-{0x88, MOV, I_M_R_RM, 3},
-{0x89, MOV, I_M_R_RM, 3},
-{0x8A, MOV, I_M_R_RM, 3},
-{0x8B, MOV, I_M_R_RM, 3},
-{0x8C, MOV, I_M_R_RM, 3},
+{0x80, ANY, I_IMM_REGMEM, 4},
+{0x81, ANY, I_IMM_REGMEM, 5},
+{0x82, ANY, I_IMM_REGMEM, 4},
+{0x83, ANY, I_IMM_REGMEM, 4},
+{0x88, MOV, I_REG_REGMEM, 3},
+{0x89, MOV, I_REG_REGMEM, 3},
+{0x8A, MOV, I_REG_REGMEM, 3},
+{0x8B, MOV, I_REG_REGMEM, 3},
+{0x8C, MOV, I_REG_REGMEM, 3},
 {0xA0, MOV, I_ACC, 2},
 {0xA1, MOV, I_ACC, 2},
 {0xA2, MOV, I_ACC, 2},
@@ -144,8 +144,8 @@ instr Handled_Instrs[] = {
 {0xBD, MOV, I_MOV, 2},
 {0xBE, MOV, I_MOV, 2},
 {0xBF, MOV, I_MOV, 2},
-{0xC6, MOV, I_BYTE2, 4},
-{0xC7, MOV, I_BYTE2, 5},
+{0xC6, MOV, I_IMM_REGMEM, 4},
+{0xC7, MOV, I_IMM_REGMEM, 5},
 {0xE0, ANY, I_LOOP, 1},
 {0xE1, ANY, I_LOOP, 1},
 {0xE2, ANY, I_LOOP, 1},
@@ -167,11 +167,6 @@ u8 PopBuffer(buffer *buff) {
     return result;
 }
 
-/* u8 PeekBuffer(buffer *buff) { */
-/*     u8 result = *(u8*)(buff->buffer + buff->index); */
-/*     return result; */
-/* } */
-
 void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
     instr instr = All_Instrs[byte.byte];
@@ -185,7 +180,6 @@ void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
         return;
     }
 
-    char mem_addr[16] = {};
     i16 disp = 0;
     u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM & byte2.rm == 0b110) ? 1 : 0;
 
@@ -198,15 +192,16 @@ void ModRegRm(b1 byte, buffer *code_buffer, buffer* asm_buffer) {
         disp = U8ToI16(disp_hi, disp_lo);
     }
 
+    char mem_addr[32] = {};
+    sprintf(mem_addr, "[%s + %hd]", rm, disp);
     if (byte2.mod == MOD_MEM) {
         if (mem_mode_16bit_disp) {
             sprintf(mem_addr, "[%hd]", disp);
         } else {
             sprintf(mem_addr, "[%s]", rm);
         }
-    } else {
-        sprintf(mem_addr, "[%s + %hd]", rm, disp);
     }
+
     char *src = reg;
     char *dst = mem_addr;
 
