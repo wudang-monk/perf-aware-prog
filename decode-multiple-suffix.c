@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 typedef uint8_t u8;
@@ -43,6 +44,14 @@ JMP = 10
 
 typedef union {
     struct {
+        u16 lo: 8;
+        u16 hi: 8;
+    };
+    u16 full;
+}reg;
+
+typedef union {
+    struct {
         u8 rm: 3;
         u8 reg: 3;
         mod mod: 2;
@@ -78,6 +87,7 @@ char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", 
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
+reg Registers[8] = {};
 
 instr Handled_Instrs[] = {
 {0x0, ADD, I_REG_REGMEM, 3},
@@ -166,13 +176,21 @@ u8 PopBuffer(buffer *buff) {
     return result;
 }
 
-void REGIMM_REGMEM(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
+void PrintRegisters() {
+    printf("Final Registers\n");
+    for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
+        printf("\t%s: %x\n", word_registers[i], Registers[i].full);
+    }
+}
+
+void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
     instr instr = All_Instrs[byte.byte];
     char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
     char *rm = rm_mem_table[byte2.rm];
     char *reg = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
 
+    // Register to register
     if (byte2.mod == MOD_REG) {
         char data_str[32] = {};
         rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
@@ -188,6 +206,7 @@ void REGIMM_REGMEM(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
             reg = data_str;
         }
 
+        Registers[byte2.rm].full = Registers[byte2.reg].full;
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, rm, reg);
         return;
     }
@@ -204,6 +223,7 @@ void REGIMM_REGMEM(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         disp = U8ToI16(disp_hi, disp_lo);
     }
 
+    // Memory displacement
     char mem_addr[32] = {};
     sprintf(mem_addr, "[%s + %hd]", rm, disp);
     if (byte2.mod == MOD_MEM) {
@@ -216,6 +236,7 @@ void REGIMM_REGMEM(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
     char *src = reg;
     char *dst = mem_addr;
 
+    // Immediate to Register/Mem
     if (type == I_IMM_REGMEM) {
         u8 data_lo = PopBuffer(code_buffer);
         i16 data = (i8)data_lo;
@@ -239,7 +260,7 @@ void REGIMM_REGMEM(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
     return;
 }
 
-void AccInstr(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
+void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     instr instr = All_Instrs[byte.byte];
     char *dst = (byte.w) ? "ax" : "al";
     u8 data_lo = PopBuffer(code_buffer);
@@ -274,6 +295,7 @@ int main(int argc, char *argv[]) {
         printf("No Filename passed to program. Exiting\n");
         return 0;
     }
+
     char *filename = argv[1];
     char *fileout = argv[2] ? argv[2] : "asm-out/asm_out.asm";
     FILE *fp = fopen(filename, "rb");
@@ -306,12 +328,12 @@ int main(int argc, char *argv[]) {
         instr instr = All_Instrs[byte.byte];
         switch(instr.type) {
             case I_ACC: {
-                AccInstr(byte, &code_buffer, &asm_buffer);
+                Acc(byte, &code_buffer, &asm_buffer);
                 break;
             }
             case I_REG_REGMEM:
             case I_IMM_REGMEM: {
-                REGIMM_REGMEM(byte, &code_buffer, &asm_buffer, instr.type);
+                RegIMM_RegMem(byte, &code_buffer, &asm_buffer, instr.type);
                 break;
             }
             case I_LOOP:
@@ -328,9 +350,11 @@ int main(int argc, char *argv[]) {
                 char *dst = (wide) ? word_registers[reg] : byte_registers[reg];
                 u8 data_lo = PopBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
+                Registers[reg].lo = data;
                 if (wide) {
                     u8 data_hi = PopBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
+                    Registers[reg].full = data;
                 }
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", dst, data);
                 printf("MOV: %s, %hd", dst, data);
@@ -348,6 +372,7 @@ int main(int argc, char *argv[]) {
 
     fprintf(out, "%s", (char*)asm_buffer.buffer);
     fclose(out);
+    PrintRegisters();
 
     return 0;
 }
