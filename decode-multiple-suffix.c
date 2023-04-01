@@ -30,12 +30,12 @@ I_LOOP = 6
 // (NOTE) these enums are currently only used for mod reg r/m functions that do not encode the instruction in the reg field
 typedef enum {
 ADD = 0,
-/* OR, */
-/* ADC, */
-/* SBB, */
-/* AND, */
+OR,
+ADC,
+SBB,
+AND,
 SUB = 5,
-/* XOR, */
+XOR,
 CMP = 7,
 MOV = 8,
 ANY = 9,
@@ -81,6 +81,8 @@ typedef struct {
     u32 size;
 }buffer;
 
+
+u8 CARRY_FLAG = 0;
 char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
@@ -183,6 +185,56 @@ void PrintRegisters() {
     }
 }
 
+void Command(b2 byte2, op_type type) {
+    u8 dst = byte2.rm;
+    u8 src = byte2.reg;
+    u8 mod = byte2.mod;
+    u16 result = Registers[dst].full;
+    switch(type) {
+        case ADD: {
+            result += Registers[src].full;
+            break;
+        }
+        case ADC: {
+            result += Registers[src].full + CARRY_FLAG;
+            break;
+        }
+        case SBB: {
+            result -= Registers[src].full - CARRY_FLAG;
+            break;
+        }
+        case OR: {
+            result = (result | Registers[src].full);
+            break;
+        }
+        case AND: {
+            result = (result & Registers[src].full);
+            break;
+        }
+        case SUB: {
+            result -= Registers[src].full;
+            break;
+        }
+        case XOR: {
+            result = (result ^ Registers[src].full);
+            break;
+        }
+        case CMP: {
+            result = (result == Registers[src].full);
+            break;
+        }
+        case MOV: {
+            result = Registers[src].full;
+            break;
+        }
+        default: {
+            printf("COMMAND: %d, NOT Handled\n", type);
+        }
+    }
+
+    Registers[dst].full = result;
+}
+
 void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
     instr instr = All_Instrs[byte.byte];
@@ -206,7 +258,8 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
             reg = data_str;
         }
 
-        Registers[byte2.rm].full = Registers[byte2.reg].full;
+        /* Registers[byte2.rm].full = Registers[byte2.reg].full; */
+        Command(byte2, instr.name);
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, rm, reg);
         return;
     }
@@ -278,6 +331,7 @@ void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     } else {
         sprintf(command, "%hd", data);
     }
+
     char *src = command;
     if (byte.d) {
         char *tmp = src;
@@ -289,6 +343,7 @@ void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
 
     printf("ACC: [%d, hex: %x]\n", byte.byte, byte.byte);
 }
+
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -350,12 +405,13 @@ int main(int argc, char *argv[]) {
                 char *dst = (wide) ? word_registers[reg] : byte_registers[reg];
                 u8 data_lo = PopBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
-                Registers[reg].lo = data;
+
                 if (wide) {
                     u8 data_hi = PopBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
-                    Registers[reg].full = data;
                 }
+
+                Registers[reg].full = data;
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "mov %s, %hd\n", dst, data);
                 printf("MOV: %s, %hd", dst, data);
                 break;
