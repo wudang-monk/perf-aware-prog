@@ -65,7 +65,8 @@ typedef struct {
             u8 reg : 3;
             u8 wide : 1;
             u8 immediate : 1;
-            u8 unused : 3;
+            u8 segment : 1;
+            u8 unused : 2;
         };
         u8 byte;
     };
@@ -105,11 +106,13 @@ typedef struct {
 u8 CARRY_FLAG = 0;
 char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
+char *Segment_Reg_Names[] = {"es", "cs", "ss", "ds"};
 char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 reg Registers[8] = {};
+u16 Segment_Registers[4] = {};
 
 instr All_Instrs[256] = {};
 instr Handled_Instrs[] = {
@@ -198,21 +201,28 @@ u8 PopBuffer(buffer *buff) {
 }
 
 void PrintRegisters() {
-    printf("Final Registers\n");
+    printf("Registers\n");
     for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
         printf("\t%s: %x\n", word_registers[i], Registers[i].full);
     }
+    printf("Segment Registers\n");
+    for (int i = 0; i < ARRAY_SIZE(Segment_Registers); i++) {
+        printf("\t%s: %x\n", Segment_Reg_Names[i], Segment_Registers[i]);
+    }
 }
 
-static inline u16 GetRegisterState(u8 reg_slot, b8 wide) {
+static inline u16 GetRegisterState(u8 reg, b8 wide, b8 segment) {
     u16 result = 0;
     if (wide) {
-        result = Registers[reg_slot].full;
-    } else if (reg_slot > 3) {
-        //
-        result = Registers[reg_slot % 4].hi;
+        if (segment) {
+            result = Segment_Registers[reg];
+        } else {
+            result = Registers[reg].full;
+        }
+    } else if (reg > 3) {
+        result = Registers[reg % 4].hi;
     } else {
-        result = Registers[reg_slot].lo;
+        result = Registers[reg].lo;
     }
 
     return result;
@@ -229,10 +239,16 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             src_data = dst.data.lo;
         }
     } else {
-        dst_data = GetRegisterState(dst.reg, dst.wide);
-        src_data = GetRegisterState(src.reg, src.wide);
+        dst_data = GetRegisterState(dst.reg, dst.wide, dst.segment);
+        src_data = GetRegisterState(src.reg, src.wide, src.segment);
     }
 
+    u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
+    u16 before = Registers[dst_reg].full;
+    char *reg_name = NULL;
+    if (dst.segment) {
+        before = Segment_Registers[dst.reg];
+    }
     char *instr_name = Instr_Names[inst.name];
     switch(inst.name) {
         case ADD: {
@@ -276,18 +292,22 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         }
     }
 
-    u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
-    u16 before = Registers[dst_reg].full;
-    if (dst.wide) {
+    if (dst.segment) {
+        reg_name = Segment_Reg_Names[dst.reg];
+        Segment_Registers[dst.reg] = dst_data;
+    } else if (dst.wide) {
+        reg_name = word_registers[dst.reg];
         Registers[dst.reg].full = dst_data;
     } else if (dst.reg > 3) {
+        reg_name = byte_registers[dst.reg % 4];
         Registers[dst.reg % 4].hi = dst_data;
     } else {
+        reg_name = byte_registers[dst.reg];
         Registers[dst.reg].lo = dst_data;
     }
 
     printf("%s ; ", asm_string);
-    printf("%s: %x -> %x\n", instr_name, before, Registers[dst_reg].full);
+    printf("%s %s: %x -> %x\n", instr_name, reg_name, before, Registers[dst_reg].full);
 }
 
 void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
@@ -321,7 +341,25 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         }
 
         char asm_string[32] = {};
-        sprintf(asm_string, "%s %s, %s", instr_name, rm, src_name);
+        if ((byte.byte == 0x8C) || (byte.byte == 0x8E)) {
+            // Segment mov
+            dst = (operand){.reg = byte2.rm, .wide = true};
+            char *dst_name = word_registers[byte2.rm];
+            src = (operand){.reg = byte2.reg, .wide = true, .segment = true};
+            src_name = Segment_Reg_Names[src.reg];
+            if (byte.d) {
+                operand tmp_op = src;
+                src = dst;
+                dst = tmp_op;
+                char *tmp_name = src_name;
+                src_name = dst_name;
+                dst_name = tmp_name;
+            }
+
+            sprintf(asm_string, "%s %s, %s", instr_name, dst_name, src_name);
+        } else {
+            sprintf(asm_string, "%s %s, %s", instr_name, rm, src_name);
+        }
         Command(dst, src, instr, asm_string);
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
         return;
@@ -462,10 +500,10 @@ int main(int argc, char *argv[]) {
                 break;
             }
             case I_MOV: {
-                /* u8 wide = (byte.byte >> 3) & 0b00001; */
-                operand op = {.byte = byte.byte};
+                u8 wide = (byte.byte >> 3) & 0b00001;
+                u8 reg = byte.byte & 0b00000111;
+                operand op = {.wide = wide, .reg = reg};
                 op.immediate = true;
-                /* u8 reg = byte.byte & 0b00000111; */
                 char *dst = (op.wide) ? word_registers[op.reg] : byte_registers[op.reg];
                 u8 data_lo = PopBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
