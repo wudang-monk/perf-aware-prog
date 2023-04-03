@@ -302,13 +302,9 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
     // Register to register
     if (byte2.mod == MOD_REG) {
         char data_str[32] = {};
-        operand dst = {};
-        operand src = {};
+        operand dst = {.reg = byte2.rm, .wide = byte.w};
+        operand src = {.reg = byte2.reg, .wide = byte.w};
         rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
-        dst.reg = byte2.rm;
-        src.reg = byte2.reg;
-        dst.wide = byte.w;
-        src.wide = byte.w;
 
         if (type == I_IMM_REGMEM) {
             dst.immediate = true;
@@ -481,10 +477,9 @@ int main(int argc, char *argv[]) {
 
                 op.data.full = data;
                 char asm_string[32] = {};
-                sprintf(asm_string, "mov %s, %hx", dst, data);
+                sprintf(asm_string, "mov %s, %hd", dst, data);
                 Command(op, (operand){}, instr, asm_string);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
-                /* printf("MOV: %s, %hd", dst, data); */
                 break;
             }
         }
