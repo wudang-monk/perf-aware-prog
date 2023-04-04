@@ -30,6 +30,25 @@ I_JUMP = 5,
 I_LOOP = 6
 }inst_type;
 
+typedef union {
+    struct {
+        u16 c : 1;
+        u16 unused3 : 1;
+        u16 p : 1;
+        u16 unused2 : 1;
+        u16 a : 1;
+        u16 unused1 : 1;
+        u16 z : 1;
+        u16 s : 1;
+        u16 t : 1;
+        u16 i : 1;
+        u16 d : 1;
+        u16 o : 1;
+        u16 unused : 4;
+    };
+    u16 all;
+}flags;
+
 // (NOTE) these enums are currently only used for mod reg r/m functions that do not encode the instruction in the reg field
 typedef enum {
 ADD = 0,
@@ -52,11 +71,6 @@ typedef union {
     };
     u16 full;
 }reg;
-
-typedef struct {
-    reg before;
-    reg after;
-}reg_state;
 
 typedef struct {
     reg data;
@@ -103,11 +117,12 @@ typedef struct {
     u32 size;
 }buffer;
 
-u8 CARRY_FLAG = 0;
-char *byte_registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
-char *word_registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
+flags FLAGS = {};
+char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
+char *Byte_Registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
+char *Word_Registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *Segment_Reg_Names[] = {"es", "cs", "ss", "ds"};
-char *rm_mem_table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
+char *Rm_Mem_Table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
@@ -200,67 +215,83 @@ u8 PopBuffer(buffer *buff) {
     return result;
 }
 
+void PrintFlags() {
+    u8 valid_flags[12] = {1,1,1,1,1,1,0,1,0,1,0,1};
+    flags flags_copy = {.all = FLAGS.all};
+    char flags_changed[9] = {};
+    for (int i = ARRAY_SIZE(valid_flags) - 1, count = 0; i > 0; i--) {
+        if (valid_flags[i] && (flags_copy.all & 0b1)) {
+            count += sprintf(flags_changed + count, "%c ", Flag_Names[i]);
+        }
+        flags_copy.all >>= 1;
+    }
+    printf("Flags: -> %s\n", flags_changed);
+}
+
 void PrintRegisters() {
     printf("Registers\n");
     for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
-        printf("\t%s: %x\n", word_registers[i], Registers[i].full);
+        printf("\t%s: 0x%x\n", Word_Registers[i], Registers[i].full);
     }
     printf("Segment Registers\n");
     for (int i = 0; i < ARRAY_SIZE(Segment_Registers); i++) {
-        printf("\t%s: %x\n", Segment_Reg_Names[i], Segment_Registers[i]);
+        printf("\t%s: 0x%x\n", Segment_Reg_Names[i], Segment_Registers[i]);
     }
+
+    PrintFlags();
 }
 
-static inline u16 GetRegisterState(u8 reg, b8 wide, b8 segment) {
+static inline u16 GetRegisterState(operand op) {
     u16 result = 0;
-    if (wide) {
-        if (segment) {
-            result = Segment_Registers[reg];
+    if (op.wide) {
+        if (op.segment) {
+            result = Segment_Registers[op.reg];
         } else {
-            result = Registers[reg].full;
+            result = Registers[op.reg].full;
         }
-    } else if (reg > 3) {
-        result = Registers[reg % 4].hi;
+    } else if (op. reg > 3) {
+        result = Registers[op.reg % 4].hi;
     } else {
-        result = Registers[reg].lo;
+        result = Registers[op.reg].lo;
     }
 
     return result;
 }
 
-void Command(operand dst, operand src, instr inst, char *asm_string) {
-    u16 dst_data = 0;
-    u16 src_data = 0;
-
-    if (dst.immediate) {
-        if (dst.wide) {
-            src_data = dst.data.full;
-        } else {
-            src_data = dst.data.lo;
-        }
-    } else {
-        dst_data = GetRegisterState(dst.reg, dst.wide, dst.segment);
-        src_data = GetRegisterState(src.reg, src.wide, src.segment);
+static inline u8 Parity(u8 byte) {
+    u8 result = 0;
+    for (int i = 0; i < 8; i++) {
+        result += byte & 0b1;
+        byte >>= 1;
     }
+    return (result % 2);
+}
+
+
+void Command(operand dst, operand src, instr inst, char *asm_string) {
+    u16 dst_data = (dst.immediate) ? dst.data.full : GetRegisterState(dst);
+    u16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src);
 
     u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
     u16 before = Registers[dst_reg].full;
+    flags before_flags = FLAGS;
     char *reg_name = NULL;
     if (dst.segment) {
         before = Segment_Registers[dst.reg];
     }
+
     char *instr_name = Instr_Names[inst.name];
     switch(inst.name) {
         case ADD: {
-            dst_data += src.data.full;
+            dst_data += src_data;
             break;
         }
         case ADC: {
-            dst_data += src_data + CARRY_FLAG;
+            dst_data += src_data + FLAGS.c;
             break;
         }
         case SBB: {
-            dst_data -= src_data - CARRY_FLAG;
+            dst_data -= src_data - FLAGS.c;
             break;
         }
         case OR: {
@@ -273,6 +304,9 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         }
         case SUB: {
             dst_data -= src_data;
+            FLAGS.s = (dst_data & 0x8000) ? true : false;
+            FLAGS.z = (dst_data == 0) ? true : false;
+            FLAGS.p = (Parity(dst_data)) ? false : true;
             break;
         }
         case XOR: {
@@ -280,7 +314,8 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         case CMP: {
-            dst_data = (dst_data == src_data);
+            FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
+            FLAGS.z = ((dst_data - src_data) == 0) ? true : false;
             break;
         }
         case MOV: {
@@ -288,7 +323,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         default: {
-            printf("COMMAND: %d, NOT Handled\n", inst.name);
+            printf("Emulator COMMAND: %d, NOT Handled\n", inst.name);
         }
     }
 
@@ -296,26 +331,37 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         reg_name = Segment_Reg_Names[dst.reg];
         Segment_Registers[dst.reg] = dst_data;
     } else if (dst.wide) {
-        reg_name = word_registers[dst.reg];
+        reg_name = Word_Registers[dst.reg];
         Registers[dst.reg].full = dst_data;
     } else if (dst.reg > 3) {
-        reg_name = byte_registers[dst.reg % 4];
+        reg_name = Byte_Registers[dst.reg % 4];
         Registers[dst.reg % 4].hi = dst_data;
     } else {
-        reg_name = byte_registers[dst.reg];
+        reg_name = Byte_Registers[dst.reg];
         Registers[dst.reg].lo = dst_data;
     }
 
     printf("%s ; ", asm_string);
-    printf("%s %s: %x -> %x\n", instr_name, reg_name, before, Registers[dst_reg].full);
+    printf("%s: 0x%x -> 0x%x ", reg_name, before, Registers[dst_reg].full);
+    flags flag_diff = {.all = before_flags.all ^ FLAGS.all};
+    if (flag_diff.all) {
+        PrintFlags();
+    } else {
+        printf("\n");
+    }
 }
 
 void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
     instr instr = All_Instrs[byte.byte];
-    char *instr_name = (instr.name == ANY) ? Instr_Names[byte2.reg] : Instr_Names[instr.name];
-    char *rm = rm_mem_table[byte2.rm];
-    char *src_name = (byte.w) ? word_registers[byte2.reg] : byte_registers[byte2.reg];
+    char *instr_name = Instr_Names[instr.name];
+    if (instr.name == ANY) {
+        instr_name = Instr_Names[byte2.reg];
+        instr.name = byte2.reg;
+    }
+
+    char *rm = Rm_Mem_Table[byte2.rm];
+    char *src_name = (byte.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
     reg data = {};
     reg disp = {};
 
@@ -324,10 +370,9 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         char data_str[32] = {};
         operand dst = {.reg = byte2.rm, .wide = byte.w};
         operand src = {.reg = byte2.reg, .wide = byte.w};
-        rm = (byte.w) ? word_registers[byte2.rm] : byte_registers[byte2.rm];
+        rm = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
 
         if (type == I_IMM_REGMEM) {
-            dst.immediate = true;
             u8 data_lo = PopBuffer(code_buffer);
             data.lo = (i8)data_lo;
             if (byte.w && instr.bytes_used == 5) {
@@ -335,7 +380,8 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
                 data.full = U8ToI16(data_hi, data_lo);
             }
 
-            dst.data.full = data.full;
+            src.data.full = data.full;
+            src.immediate = true;
             sprintf(data_str, "%hd", data.full);
             src_name = data_str;
         }
@@ -344,7 +390,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         if ((byte.byte == 0x8C) || (byte.byte == 0x8E)) {
             // Segment mov
             dst = (operand){.reg = byte2.rm, .wide = true};
-            char *dst_name = word_registers[byte2.rm];
+            char *dst_name = Word_Registers[byte2.rm];
             src = (operand){.reg = byte2.reg, .wide = true, .segment = true};
             src_name = Segment_Reg_Names[src.reg];
             if (byte.d) {
@@ -502,21 +548,22 @@ int main(int argc, char *argv[]) {
             case I_MOV: {
                 u8 wide = (byte.byte >> 3) & 0b00001;
                 u8 reg = byte.byte & 0b00000111;
-                operand op = {.wide = wide, .reg = reg};
-                op.immediate = true;
-                char *dst = (op.wide) ? word_registers[op.reg] : byte_registers[op.reg];
+                operand dst = {.wide = wide, .reg = reg};
+                operand src = {.wide = wide, .reg = reg};
+                char *dst_name = (dst.wide) ? Word_Registers[dst.reg] : Byte_Registers[dst.reg];
                 u8 data_lo = PopBuffer(&code_buffer);
                 i16 data = (i8)data_lo;
 
-                if (op.wide) {
+                if (dst.wide) {
                     u8 data_hi = PopBuffer(&code_buffer);
                     data = U8ToI16(data_hi, data_lo);
                 }
 
-                op.data.full = data;
+                src.data.full = data;
+                src.immediate = true;
                 char asm_string[32] = {};
-                sprintf(asm_string, "mov %s, %hd", dst, data);
-                Command(op, (operand){}, instr, asm_string);
+                sprintf(asm_string, "mov %s, %hd", dst_name, data);
+                Command(dst, src, instr, asm_string);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
                 break;
             }
