@@ -360,7 +360,8 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         instr.name = byte2.reg;
     }
 
-    char *rm = Rm_Mem_Table[byte2.rm];
+    /* char *rm = Rm_Mem_Table[byte2.rm]; */
+    char *dst_name = Rm_Mem_Table[byte2.rm];
     char *src_name = (byte.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
     reg data = {};
     reg disp = {};
@@ -370,7 +371,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         char data_str[32] = {};
         operand dst = {.reg = byte2.rm, .wide = byte.w};
         operand src = {.reg = byte2.reg, .wide = byte.w};
-        rm = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
+        dst_name = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
 
         if (type == I_IMM_REGMEM) {
             u8 data_lo = PopBuffer(code_buffer);
@@ -390,7 +391,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         if ((byte.byte == 0x8C) || (byte.byte == 0x8E)) {
             // Segment mov
             dst = (operand){.reg = byte2.rm, .wide = true};
-            char *dst_name = Word_Registers[byte2.rm];
+            dst_name = Word_Registers[byte2.rm];
             src = (operand){.reg = byte2.reg, .wide = true, .segment = true};
             src_name = Segment_Reg_Names[src.reg];
             if (byte.d) {
@@ -401,17 +402,14 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
                 src_name = dst_name;
                 dst_name = tmp_name;
             }
-
-            sprintf(asm_string, "%s %s, %s", instr_name, dst_name, src_name);
-        } else {
-            sprintf(asm_string, "%s %s, %s", instr_name, rm, src_name);
         }
+
+        sprintf(asm_string, "%s %s, %s", instr_name, dst_name, src_name);
         Command(dst, src, instr, asm_string);
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
         return;
     }
 
-    /* i16 disp = 0; */
     u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
 
     if (byte2.mod == MOD_MEM_8) {
@@ -425,9 +423,9 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
 
     // Memory displacement
     char mem_addr[32] = {};
-    sprintf(mem_addr, "[%s + %hd]", rm, disp.full);
+    sprintf(mem_addr, "[%s + %hd]", dst_name, disp.full);
     if (byte2.mod == MOD_MEM) {
-        sprintf(mem_addr, "[%s]", rm);
+        sprintf(mem_addr, "[%s]", dst_name);
         if (mem_mode_16bit_disp) {
             sprintf(mem_addr, "[%hd]", disp.full);
         }
