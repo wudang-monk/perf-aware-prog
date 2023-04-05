@@ -133,6 +133,8 @@ char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js"
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 reg Registers[8] = {};
 u16 Segment_Registers[4] = {};
+u16 IP = 0;
+u16 IP_Last = 0;
 
 instr All_Instrs[256] = {};
 instr Handled_Instrs[] = {
@@ -216,7 +218,8 @@ i16 U8ToI16(u8 high, u8 low) {
 
 u8 PopBuffer(buffer *buff) {
     u8 result = *(u8*)(buff->buffer + buff->index);
-    ++buff->index;
+    IP += 1;
+    buff->index = IP;
     return result;
 }
 
@@ -523,6 +526,7 @@ int main(int argc, char *argv[]) {
 
     int i = 0;
     while (code_buffer.index < bytes_read) {
+        IP_Last = IP;
         b1 byte = {.byte = PopBuffer(&code_buffer)};
         char command[32] = {};
         instr instr = All_Instrs[byte.byte];
