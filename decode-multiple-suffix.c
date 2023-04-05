@@ -3,6 +3,11 @@
 #include <stdlib.h>
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
+#define SWAP(x, y) do { \
+    typeof(x) temp = (x); \
+    (x) = (y); \
+    (y) = temp; \
+} while (0)
 #define true 1
 #define false 0
 
@@ -231,12 +236,20 @@ void PrintFlags() {
 void PrintRegisters() {
     printf("Registers\n");
     for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
-        printf("\t%s: 0x%x\n", Word_Registers[i], Registers[i].full);
+        u16 value = Registers[i].full;
+        if (value) {
+            printf("\t%s: 0x%x\n", Word_Registers[i], value);
+        }
     }
-    printf("Segment Registers\n");
+
     for (int i = 0; i < ARRAY_SIZE(Segment_Registers); i++) {
-        printf("\t%s: 0x%x\n", Segment_Reg_Names[i], Segment_Registers[i]);
+        u16 value = Segment_Registers[i];
+        if (value) {
+            printf("\t%s: 0x%x\n", Segment_Reg_Names[i], Segment_Registers[i]);
+        }
     }
+    // print IP register
+    printf("\t%s: 0x%x\n", "ip", IP);
 
     PrintFlags();
 }
@@ -342,7 +355,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     }
 
     printf("%s ; ", asm_string);
-    printf("%s: 0x%x -> 0x%x ", reg_name, before, Registers[dst_reg].full);
+    printf("%s: 0x%x -> 0x%x ip:0x%x -> 0x%x ", reg_name, before, Registers[dst_reg].full, IP_Last, IP);
     flags flag_diff = {.all = before_flags.all ^ FLAGS.all};
     if (flag_diff.all) {
         PrintFlags();
@@ -354,24 +367,22 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
 void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
     instr instr = All_Instrs[byte.byte];
-    char *instr_name = Instr_Names[instr.name];
+    char *instr_string = Instr_Names[instr.name];
     if (instr.name == ANY) {
-        instr_name = Instr_Names[byte2.reg];
+        instr_string = Instr_Names[byte2.reg];
         instr.name = byte2.reg;
     }
 
-    /* char *rm = Rm_Mem_Table[byte2.rm]; */
-    char *dst_name = Rm_Mem_Table[byte2.rm];
-    char *src_name = (byte.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
+    char *dst_string = Rm_Mem_Table[byte2.rm];
+    char *src_string = (byte.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
     reg data = {};
-    reg disp = {};
 
     // Register to register
     if (byte2.mod == MOD_REG) {
         char data_str[32] = {};
         operand dst = {.reg = byte2.rm, .wide = byte.w};
         operand src = {.reg = byte2.reg, .wide = byte.w};
-        dst_name = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
+        dst_string = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
 
         if (type == I_IMM_REGMEM) {
             u8 data_lo = PopBuffer(code_buffer);
@@ -384,33 +395,31 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
             src.data.full = data.full;
             src.immediate = true;
             sprintf(data_str, "%hd", data.full);
-            src_name = data_str;
+            src_string = data_str;
         }
 
         char asm_string[32] = {};
         if ((byte.byte == 0x8C) || (byte.byte == 0x8E)) {
             // Segment mov
             dst = (operand){.reg = byte2.rm, .wide = true};
-            dst_name = Word_Registers[byte2.rm];
             src = (operand){.reg = byte2.reg, .wide = true, .segment = true};
-            src_name = Segment_Reg_Names[src.reg];
+            dst_string = Word_Registers[dst.reg];
+            src_string = Segment_Reg_Names[src.reg];
             if (byte.d) {
-                operand tmp_op = src;
-                src = dst;
-                dst = tmp_op;
-                char *tmp_name = src_name;
-                src_name = dst_name;
-                dst_name = tmp_name;
+                SWAP(src, dst);
+                SWAP(src_string, dst_string);
             }
         }
 
-        sprintf(asm_string, "%s %s, %s", instr_name, dst_name, src_name);
+        sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
         Command(dst, src, instr, asm_string);
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
         return;
     }
 
+    // Memory displacement
     u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
+    reg disp = {};
 
     if (byte2.mod == MOD_MEM_8) {
         i8 disp_lo = PopBuffer(code_buffer);
@@ -421,18 +430,16 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         disp.full = U8ToI16(disp_hi, disp_lo);
     }
 
-    // Memory displacement
     char mem_addr[32] = {};
-    sprintf(mem_addr, "[%s + %hd]", dst_name, disp.full);
+    sprintf(mem_addr, "[%s + %hd]", dst_string, disp.full);
     if (byte2.mod == MOD_MEM) {
-        sprintf(mem_addr, "[%s]", dst_name);
+        sprintf(mem_addr, "[%s]", dst_string);
         if (mem_mode_16bit_disp) {
             sprintf(mem_addr, "[%hd]", disp.full);
         }
     }
 
-    char *src = src_name;
-    char *dst = mem_addr;
+    dst_string = mem_addr;
 
     // Immediate to Register/Mem
     if (type == I_IMM_REGMEM) {
@@ -446,31 +453,29 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
 
         char data_str[16] = {};
         sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data.full);
-        src = data_str;
+        src_string = data_str;
     } else if (byte.d) {
-        char *tmp = src;
-        src = dst;
-        dst = tmp;
+        SWAP(dst_string, src_string);
     }
 
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_string, dst_string, src_string);
 
     return;
 }
-
+// NOTE(Peter) Look into simplifying the Acc functions or moving it to the rest of the RegImm_RegMem function
 void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     instr instr = All_Instrs[byte.byte];
     char *dst = (byte.w) ? "ax" : "al";
     u8 data_lo = PopBuffer(code_buffer);
     i16 data = (i8)data_lo;
     char *instr_name = Instr_Names[instr.name];
-    char command[16] = {};
     // mov instructions always require an address lo/hi
     if (byte.w || instr.name == MOV) {
         u8 data_hi = PopBuffer(code_buffer);
         data = U8ToI16(data_hi, data_lo);
     }
 
+    char command[16] = {};
     if (instr.name == MOV) {
         sprintf(command, "[%hd]", data);
     } else {
@@ -479,14 +484,10 @@ void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
 
     char *src = command;
     if (byte.d) {
-        char *tmp = src;
-        src = dst;
-        dst = tmp;
+        SWAP(src, dst);
     }
     
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
-
-    printf("ACC: [%d, hex: %x]\n", byte.byte, byte.byte);
 }
 
 int main(int argc, char *argv[]) {
