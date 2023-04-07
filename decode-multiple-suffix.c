@@ -71,10 +71,10 @@ JMP = 10
 
 typedef union {
     struct {
-        u8 lo;
-        u8 hi;
+        i8 lo;
+        i8 hi;
     };
-    u16 full;
+    i16 full;
 }reg;
 
 typedef struct {
@@ -223,17 +223,19 @@ u8 PopBuffer(buffer *buff) {
     return result;
 }
 
-void PrintFlags() {
+void PrintFlags(u16 flags_state, char *string) {
     u8 valid_flags[12] = {1,1,1,1,1,1,0,1,0,1,0,1};
-    flags flags_copy = {.all = FLAGS.all};
+    /* flags flags_copy = {.all = FLAGS.all}; */
     char flags_changed[9] = {};
-    for (int i = ARRAY_SIZE(valid_flags) - 1, count = 0; i > 0; i--) {
-        if (valid_flags[i] && (flags_copy.all & 0b1)) {
+    for (int i = ARRAY_SIZE(valid_flags) - 1, count = 0; i >= 0; i--) {
+        b8 valid = valid_flags[i];
+        b8 state = flags_state & 0b1;
+        if (valid && state) {
             count += sprintf(flags_changed + count, "%c ", Flag_Names[i]);
         }
-        flags_copy.all >>= 1;
+        flags_state >>= 1;
     }
-    printf("Flags: -> %s\n", flags_changed);
+    sprintf(string, "%s", flags_changed);
 }
 
 void PrintRegisters() {
@@ -253,12 +255,13 @@ void PrintRegisters() {
     }
     // print IP register
     printf("\t%s: 0x%x\n", "ip", IP);
-
-    PrintFlags();
+    char flags_string[10] = {};
+    PrintFlags(FLAGS.all, flags_string);
+    printf("Flags: %s\n", flags_string);
 }
 
-static inline u16 GetRegisterState(operand op) {
-    u16 result = 0;
+static inline i16 GetRegisterState(operand op) {
+    i16 result = 0;
     if (op.wide) {
         if (op.segment) {
             result = Segment_Registers[op.reg];
@@ -283,10 +286,30 @@ static inline u8 Parity(u8 byte) {
     return (result % 2);
 }
 
+static inline u8 OF(u16 num_a, u16 num_b, b8 addition) {
+    u8 result = 0;
+    u8 sign_a = (num_a >> 15);
+    u8 sign_b = (num_b >> 15);
+    u8 sign_a_b_equal = !(sign_a ^ sign_b);
+    if (addition) {
+        u8 sign_sum = ((num_a + num_b) >> 15);
+        if (sign_a_b_equal) {
+            result = sign_sum != sign_a;
+        }
+    } else {
+        u8 sign_sub = ((num_a - num_b) >> 15);
+        u8 sign_sub_b_equal = !(sign_sub ^ sign_b);
+        if (sign_sub_b_equal) {
+            result = sign_a != sign_sub;
+        }
+    }
+    /* printf("%s: %d, %d -> %d   OF: %s\n", addition ? "ADD" : "SUB", num_a, num_b, (num_a + num_b), result ? "true" : "false"); */
+    return result;
+}
 
 void Command(operand dst, operand src, instr inst, char *asm_string) {
-    u16 dst_data = (dst.immediate) ? dst.data.full : GetRegisterState(dst);
-    u16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src);
+    i16 dst_data = (dst.immediate) ? dst.data.full : GetRegisterState(dst);
+    i16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src);
 
     u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
     u16 before = Registers[dst_reg].full;
@@ -299,7 +322,14 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     char *instr_name = Instr_Names[inst.name];
     switch(inst.name) {
         case ADD: {
+            i16 dst_before = dst_data;
+            FLAGS.o = OF(dst_before, src_data, true);
             dst_data += src_data;
+            FLAGS.c = ((dst_before & 0xFF00) + (src_data & 0xFF00)) > (dst_data & 0xFF00) ? true : false;
+            FLAGS.z = (dst_data == 0) ? true : false;
+            FLAGS.s = (dst_data & 0x8000) ? true : false;
+            FLAGS.p = (Parity(dst_data)) ? false : true;
+            FLAGS.a = ((dst_data & 0x000F) < (dst_before & 0x000F)) ? true : false;
             break;
         }
         case ADC: {
@@ -319,10 +349,14 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         case SUB: {
+            i16 dst_before = dst_data;
+            FLAGS.o = OF(dst_before, src_data, false);
             dst_data -= src_data;
-            FLAGS.s = (dst_data & 0x8000) ? true : false;
+            FLAGS.c = ((dst_before & 0xFF00) - (src_data & 0xFF00)) < (dst_data & 0xFF00) ? true : false;
             FLAGS.z = (dst_data == 0) ? true : false;
+            FLAGS.s = (dst_data & 0x8000) ? true : false;
             FLAGS.p = (Parity(dst_data)) ? false : true;
+            FLAGS.a = ((dst_data & 0x000F) > (dst_before & 0x00F0) >> 4) ? true : false;
             break;
         }
         case XOR: {
@@ -330,8 +364,13 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         case CMP: {
+            i16 dst_before = dst_data;
             FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
             FLAGS.z = ((dst_data - src_data) == 0) ? true : false;
+            FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
+            FLAGS.o = (((src_data & 0x8000) && (dst_before & 0x8000) != (dst_data & 0x8000))) ? true : false;
+            FLAGS.p = (Parity((dst_data - src_data))) ? false : true;
+            FLAGS.a = ((dst_data & 0x000F) > (dst_before & 0x000F) >> 4) ? true : false;
             break;
         }
         case MOV: {
@@ -361,7 +400,11 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     printf("%s: 0x%x -> 0x%x ip:0x%x -> 0x%x ", reg_name, before, Registers[dst_reg].full, IP_Last, IP);
     flags flag_diff = {.all = before_flags.all ^ FLAGS.all};
     if (flag_diff.all) {
-        PrintFlags();
+        char flags_before[10] = {};
+        char flags_after[10] = {};
+        PrintFlags(before_flags.all, flags_before);
+        PrintFlags(FLAGS.all, flags_after);
+        printf("Flags: %s -> %s\n", flags_before, flags_after);
     } else {
         printf("\n");
     }
@@ -389,7 +432,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
 
         if (type == I_IMM_REGMEM) {
             u8 data_lo = PopBuffer(code_buffer);
-            data.lo = (i8)data_lo;
+            data.full = (i8)data_lo;
             if (byte.w && instr.bytes_used == 5) {
                 u8 data_hi = PopBuffer(code_buffer);
                 data.full = U8ToI16(data_hi, data_lo);
@@ -447,7 +490,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
     // Immediate to Register/Mem
     if (type == I_IMM_REGMEM) {
         u8 data_lo = PopBuffer(code_buffer);
-        data.lo = (i8)data_lo;
+        data.full = (i8)data_lo;
 
         if (byte.w && instr.bytes_used == 5) {
             u8 data_hi = PopBuffer(code_buffer);
