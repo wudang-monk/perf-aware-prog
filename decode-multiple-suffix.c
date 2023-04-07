@@ -156,7 +156,6 @@ typedef struct {
 
 state STATE = {};
 state OLD_STATE = {};
-Flags FLAGS = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
 char *Byte_Registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *Word_Registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
@@ -165,8 +164,6 @@ char *Rm_Mem_Table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", 
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
-reg Registers[8] = {};
-u16 Segment_Registers[4] = {};
 
 instr All_Instrs[256] = {};
 instr Handled_Instrs[] = {
@@ -249,17 +246,14 @@ i16 U8ToI16(u8 high, u8 low) {
 }
 
 u8 PopBuffer(buffer *buff) {
-    /* buff->index = IP; */
     buff->index = STATE.ip;
     u8 result = *(u8*)(buff->buffer + buff->index);
-    /* IP += 1; */
     STATE.ip += 1;
     return result;
 }
 
 static inline void SetIP(i8 disp) {
     STATE.ip += disp;
-    /* IP += disp; */
 }
 
 void PrintFlags(u16 flags_state, char *string) {
@@ -279,29 +273,29 @@ void PrintFlags(u16 flags_state, char *string) {
 
 void PrintRegisters() {
     printf("Registers\n");
-    for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
-        u16 value = Registers[i].full;
+    for (int i = 0; i < ARRAY_SIZE(STATE.registers); i++) {
+        u16 value = STATE.registers[i].full;
         if (value) {
             printf("\t%s: 0x%x\n", Word_Registers[i], value);
         }
     }
 
-    for (int i = 0; i < ARRAY_SIZE(Segment_Registers); i++) {
-        u16 value = Segment_Registers[i];
+    for (int i = 0; i < ARRAY_SIZE(STATE.segment_registers); i++) {
+        u16 value = STATE.segment_registers[i];
         if (value) {
-            printf("\t%s: 0x%x\n", Segment_Reg_Names[i], Segment_Registers[i]);
+            printf("\t%s: 0x%x\n", Segment_Reg_Names[i], STATE.segment_registers[i]);
         }
     }
     // print IP register
     printf("\t%s: 0x%x\n", "ip", STATE.ip);
     char flags_string[10] = {};
-    PrintFlags(FLAGS.all, flags_string);
+    PrintFlags(STATE.flags.all, flags_string);
     printf("Flags: %s\n", flags_string);
 }
 
 void PrintStateDiff(char *asm_string) {
     printf("%s:\n", asm_string);
-    for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
+    for (int i = 0; i < ARRAY_SIZE(STATE.registers); i++) {
         u16 old_value = OLD_STATE.registers[i].full;
         u16 new_value = STATE.registers[i].full;
         u16 diff = (new_value ^ old_value);
@@ -310,7 +304,7 @@ void PrintStateDiff(char *asm_string) {
         }
     }
 
-    for (int i = 0; i < ARRAY_SIZE(Segment_Registers); i++) {
+    for (int i = 0; i < ARRAY_SIZE(STATE.segment_registers); i++) {
         u16 old_value = OLD_STATE.segment_registers[i];
         u16 new_value = STATE.segment_registers[i];
         u16 diff = (new_value ^ old_value);
@@ -321,12 +315,11 @@ void PrintStateDiff(char *asm_string) {
 
     printf("\t\tip: 0x%hx -> 0x%hx\n", OLD_STATE.ip, STATE.ip);
 
-    Flags flag_diff = {.all = OLD_STATE.flags.all ^ FLAGS.all};
-    if (flag_diff.all) {
+    if (OLD_STATE.flags.all ^ STATE.flags.all) {
         char flags_before[10] = {};
         char flags_after[10] = {};
         PrintFlags(OLD_STATE.flags.all, flags_before);
-        PrintFlags(FLAGS.all, flags_after);
+        PrintFlags(STATE.flags.all, flags_after);
         printf("\t\tFlags: %s -> %s\n", flags_before, flags_after);
     } else {
         printf("\n");
@@ -337,14 +330,14 @@ static inline i16 GetRegisterState(operand op) {
     i16 result = 0;
     if (op.wide) {
         if (op.segment) {
-            result = Segment_Registers[op.reg];
+            result = STATE.segment_registers[op.reg];
         } else {
-            result = Registers[op.reg].full;
+            result = STATE.registers[op.reg].full;
         }
     } else if (op. reg > 3) {
-        result = Registers[op.reg % 4].hi;
+        result = STATE.registers[op.reg % 4].hi;
     } else {
-        result = Registers[op.reg].lo;
+        result = STATE.registers[op.reg].lo;
     }
 
     return result;
@@ -385,32 +378,28 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     i16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src);
 
     u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
-    u16 before = Registers[dst_reg].full;
-    Flags before_flags = FLAGS;
+    Flags before_flags = STATE.flags;
     char *reg_name = NULL;
-    if (dst.segment) {
-        before = Segment_Registers[dst.reg];
-    }
 
     char *instr_name = Instr_Names[inst.name];
     switch(inst.name) {
         case ADD: {
             i16 dst_before = dst_data;
-            FLAGS.o = OF(dst_data, src_data, OF_ADD);
+            STATE.flags.o = OF(dst_data, src_data, OF_ADD);
             dst_data += src_data;
-            FLAGS.c = ((dst_before & 0xFF00) + (src_data & 0xFF00)) > (dst_data & 0xFF00) ? true : false;
-            FLAGS.z = (dst_data == 0) ? true : false;
-            FLAGS.s = (dst_data & 0x8000) ? true : false;
-            FLAGS.p = (Parity(dst_data)) ? false : true;
-            FLAGS.a = ((dst_data & 0x000F) < (dst_before & 0x000F)) ? true : false;
+            STATE.flags.c = ((dst_before & 0xFF00) + (src_data & 0xFF00)) > (dst_data & 0xFF00) ? true : false;
+            STATE.flags.z = (dst_data == 0) ? true : false;
+            STATE.flags.s = (dst_data & 0x8000) ? true : false;
+            STATE.flags.p = (Parity(dst_data)) ? false : true;
+            STATE.flags.a = ((dst_data & 0x000F) < (dst_before & 0x000F)) ? true : false;
             break;
         }
         case ADC: {
-            dst_data += src_data + FLAGS.c;
+            dst_data += src_data + STATE.flags.c;
             break;
         }
         case SBB: {
-            dst_data -= src_data - FLAGS.c;
+            dst_data -= src_data - STATE.flags.c;
             break;
         }
         case OR: {
@@ -423,13 +412,13 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         }
         case SUB: {
             i16 dst_before = dst_data;
-            FLAGS.o = OF(dst_before, src_data, OF_SUB);
+            STATE.flags.o = OF(dst_before, src_data, OF_SUB);
             dst_data -= src_data;
-            FLAGS.c = ((dst_before & 0xFF00) - (src_data & 0xFF00)) < (dst_data & 0xFF00) ? true : false;
-            FLAGS.z = (dst_data == 0) ? true : false;
-            FLAGS.s = (dst_data & 0x8000) ? true : false;
-            FLAGS.p = (Parity(dst_data)) ? false : true;
-            FLAGS.a = ((dst_data & 0x000F) > (dst_before & 0x00F0) >> 4) ? true : false;
+            STATE.flags.c = ((dst_before & 0xFF00) - (src_data & 0xFF00)) < (dst_data & 0xFF00) ? true : false;
+            STATE.flags.z = (dst_data == 0) ? true : false;
+            STATE.flags.s = (dst_data & 0x8000) ? true : false;
+            STATE.flags.p = (Parity(dst_data)) ? false : true;
+            STATE.flags.a = ((dst_data & 0x000F) > (dst_before & 0x00F0) >> 4) ? true : false;
             break;
         }
         case XOR: {
@@ -438,12 +427,12 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         }
         case CMP: {
             i16 dst_before = dst_data;
-            FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
-            FLAGS.z = ((dst_data - src_data) == 0) ? true : false;
-            FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
-            FLAGS.o = OF(dst_before, src_data, OF_SUB);
-            FLAGS.p = (Parity((dst_data - src_data))) ? false : true;
-            FLAGS.a = ((dst_data & 0x000F) > (dst_before & 0x000F) >> 4) ? true : false;
+            STATE.flags.s = ((dst_data - src_data) & 0x8000) ? true : false;
+            STATE.flags.z = ((dst_data - src_data) == 0) ? true : false;
+            STATE.flags.s = ((dst_data - src_data) & 0x8000) ? true : false;
+            STATE.flags.o = OF(dst_before, src_data, OF_SUB);
+            STATE.flags.p = (Parity((dst_data - src_data))) ? false : true;
+            STATE.flags.a = ((dst_data & 0x000F) > (dst_before & 0x000F) >> 4) ? true : false;
             break;
         }
         case MOV: {
@@ -457,33 +446,17 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
 
     if (dst.segment) {
         reg_name = Segment_Reg_Names[dst.reg];
-        Segment_Registers[dst.reg] = dst_data;
+        STATE.segment_registers[dst.reg] = dst_data;
     } else if (dst.wide) {
         reg_name = Word_Registers[dst.reg];
-        Registers[dst.reg].full = dst_data;
+        STATE.registers[dst.reg].full = dst_data;
     } else if (dst.reg > 3) {
         reg_name = Byte_Registers[dst.reg % 4];
-        Registers[dst.reg % 4].hi = dst_data;
+        STATE.registers[dst.reg % 4].hi = dst_data;
     } else {
         reg_name = Byte_Registers[dst.reg];
-        Registers[dst.reg].lo = dst_data;
+        STATE.registers[dst.reg].lo = dst_data;
     }
-
-    STATE.ax = Registers[0];
-    STATE.cx = Registers[1];
-    STATE.dx = Registers[2];
-    STATE.bx = Registers[3];
-    STATE.sp = Registers[4];
-    STATE.bp = Registers[5];
-    STATE.si = Registers[6];
-    STATE.di = Registers[7];
-
-    STATE.es = Segment_Registers[0];
-    STATE.cs = Segment_Registers[1];
-    STATE.ss = Segment_Registers[2];
-    STATE.ds = Segment_Registers[3];
-
-    STATE.flags.all = FLAGS.all;
 
     PrintStateDiff(asm_string);
 }
@@ -667,7 +640,7 @@ int main(int argc, char *argv[]) {
                 u8 inst_type = byte.full & 0b00001111;
                 char *instr_name = (instr.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
                 i8 disp = PopBuffer(&code_buffer);
-                if (!FLAGS.z) {
+                if (!STATE.flags.z) {
                     SetIP(disp);
                 }
                 char asm_string[32] = {};
