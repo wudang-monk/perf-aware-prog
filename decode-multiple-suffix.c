@@ -222,10 +222,14 @@ i16 U8ToI16(u8 high, u8 low) {
 }
 
 u8 PopBuffer(buffer *buff) {
+    buff->index = IP;
     u8 result = *(u8*)(buff->buffer + buff->index);
     IP += 1;
-    buff->index = IP;
     return result;
+}
+
+static inline void SetIP(i8 disp) {
+    IP += disp;
 }
 
 void PrintFlags(u16 flags_state, char *string) {
@@ -415,6 +419,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     }
 }
 
+
 void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
     instr instr = All_Instrs[byte.full];
@@ -573,7 +578,7 @@ int main(int argc, char *argv[]) {
     asm_buffer.index = sprintf(asm_buffer.buffer, ";;From file: %s\nbits 16\n", filename);
 
     int i = 0;
-    while (code_buffer.index < bytes_read) {
+    while (IP < bytes_read) {
         IP_Last = IP;
         b1 byte = {.full = PopBuffer(&code_buffer)};
         char command[32] = {};
@@ -592,8 +597,11 @@ int main(int argc, char *argv[]) {
             case I_JUMP: {
                 u8 inst_type = byte.full & 0b00001111;
                 char *instr_name = (instr.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
-                i8 inc_8 = PopBuffer(&code_buffer);
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, inc_8);
+                i8 disp = PopBuffer(&code_buffer);
+                if (!FLAGS.z) {
+                    SetIP(disp);
+                }
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, disp);
                 break;
             }
             case I_MOV: {
