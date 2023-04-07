@@ -118,7 +118,7 @@ typedef union {
         u8 d: 1;
         u8 opcode: 6;
     };
-    u8 byte;
+    u8 full;
 }b1;
 
 typedef struct {
@@ -291,12 +291,12 @@ static inline u8 Parity(u8 byte) {
     return (result % 2);
 }
 
-static inline u8 OF(u16 num_a, u16 num_b, of_type) {
+static inline u8 OF(u16 num_a, u16 num_b, of_type type) {
     u8 result = 0;
     u8 sign_a = (num_a >> 15);
     u8 sign_b = (num_b >> 15);
     u8 sign_a_b_equal = !(sign_a ^ sign_b);
-    if (OF_ADD) {
+    if (type == OF_ADD) {
         u8 sign_sum = ((num_a + num_b) >> 15);
         if (sign_a_b_equal) {
             result = sign_sum != sign_a;
@@ -328,7 +328,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     switch(inst.name) {
         case ADD: {
             i16 dst_before = dst_data;
-            FLAGS.o = OF(dst_before, src_data, OF_ADD);
+            FLAGS.o = OF(dst_data, src_data, OF_ADD);
             dst_data += src_data;
             FLAGS.c = ((dst_before & 0xFF00) + (src_data & 0xFF00)) > (dst_data & 0xFF00) ? true : false;
             FLAGS.z = (dst_data == 0) ? true : false;
@@ -402,7 +402,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     }
 
     printf("%s ; ", asm_string);
-    printf("%s: 0x%x -> 0x%x ip:0x%x -> 0x%x ", reg_name, before, Registers[dst_reg].full, IP_Last, IP);
+    printf("%s: 0x%hx -> 0x%hx ip:0x%hx -> 0x%hx ", reg_name, before, Registers[dst_reg].full, IP_Last, IP);
     flags flag_diff = {.all = before_flags.all ^ FLAGS.all};
     if (flag_diff.all) {
         char flags_before[10] = {};
@@ -417,7 +417,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
 
 void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
     b2 byte2 = {.byte = PopBuffer(code_buffer)};
-    instr instr = All_Instrs[byte.byte];
+    instr instr = All_Instrs[byte.full];
     char *instr_string = Instr_Names[instr.name];
     if (instr.name == ANY) {
         instr_string = Instr_Names[byte2.reg];
@@ -450,7 +450,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         }
 
         char asm_string[32] = {};
-        if ((byte.byte == 0x8C) || (byte.byte == 0x8E)) {
+        if ((byte.full == 0x8C) || (byte.full == 0x8E)) {
             // Segment mov
             dst = (operand){.reg = byte2.rm, .wide = true};
             src = (operand){.reg = byte2.reg, .wide = true, .segment = true};
@@ -515,7 +515,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
 }
 // NOTE(Peter) Look into simplifying the Acc functions or moving it to the rest of the RegImm_RegMem function
 void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
-    instr instr = All_Instrs[byte.byte];
+    instr instr = All_Instrs[byte.full];
     char *dst = (byte.w) ? "ax" : "al";
     u8 data_lo = PopBuffer(code_buffer);
     i16 data = (i8)data_lo;
@@ -575,9 +575,9 @@ int main(int argc, char *argv[]) {
     int i = 0;
     while (code_buffer.index < bytes_read) {
         IP_Last = IP;
-        b1 byte = {.byte = PopBuffer(&code_buffer)};
+        b1 byte = {.full = PopBuffer(&code_buffer)};
         char command[32] = {};
-        instr instr = All_Instrs[byte.byte];
+        instr instr = All_Instrs[byte.full];
         switch(instr.type) {
             case I_ACC: {
                 Acc(byte, &code_buffer, &asm_buffer);
@@ -590,15 +590,15 @@ int main(int argc, char *argv[]) {
             }
             case I_LOOP:
             case I_JUMP: {
-                u8 inst_type = byte.byte & 0b00001111;
+                u8 inst_type = byte.full & 0b00001111;
                 char *instr_name = (instr.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
                 i8 inc_8 = PopBuffer(&code_buffer);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, inc_8);
                 break;
             }
             case I_MOV: {
-                u8 wide = (byte.byte >> 3) & 0b00001;
-                u8 reg = byte.byte & 0b00000111;
+                u8 wide = ((byte.full & 0x0F) >> 3);
+                u8 reg = byte.full & 0b00000111;
                 operand dst = {.wide = wide, .reg = reg};
                 operand src = {.wide = wide, .reg = reg};
                 char *dst_name = (dst.wide) ? Word_Registers[dst.reg] : Byte_Registers[dst.reg];
