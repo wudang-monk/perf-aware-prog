@@ -20,6 +20,11 @@ typedef int16_t i16;
 typedef uint8_t b8;
 
 typedef enum {
+OF_ADD,
+OF_SUB
+}of_type;
+
+typedef enum {
 MOD_MEM = 0b0,
 MOD_MEM_8 = 0b1,
 MOD_MEM_16 = 0b10,
@@ -286,12 +291,12 @@ static inline u8 Parity(u8 byte) {
     return (result % 2);
 }
 
-static inline u8 OF(u16 num_a, u16 num_b, b8 addition) {
+static inline u8 OF(u16 num_a, u16 num_b, of_type) {
     u8 result = 0;
     u8 sign_a = (num_a >> 15);
     u8 sign_b = (num_b >> 15);
     u8 sign_a_b_equal = !(sign_a ^ sign_b);
-    if (addition) {
+    if (OF_ADD) {
         u8 sign_sum = ((num_a + num_b) >> 15);
         if (sign_a_b_equal) {
             result = sign_sum != sign_a;
@@ -323,7 +328,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
     switch(inst.name) {
         case ADD: {
             i16 dst_before = dst_data;
-            FLAGS.o = OF(dst_before, src_data, true);
+            FLAGS.o = OF(dst_before, src_data, OF_ADD);
             dst_data += src_data;
             FLAGS.c = ((dst_before & 0xFF00) + (src_data & 0xFF00)) > (dst_data & 0xFF00) ? true : false;
             FLAGS.z = (dst_data == 0) ? true : false;
@@ -350,7 +355,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         }
         case SUB: {
             i16 dst_before = dst_data;
-            FLAGS.o = OF(dst_before, src_data, false);
+            FLAGS.o = OF(dst_before, src_data, OF_SUB);
             dst_data -= src_data;
             FLAGS.c = ((dst_before & 0xFF00) - (src_data & 0xFF00)) < (dst_data & 0xFF00) ? true : false;
             FLAGS.z = (dst_data == 0) ? true : false;
@@ -368,7 +373,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
             FLAGS.z = ((dst_data - src_data) == 0) ? true : false;
             FLAGS.s = ((dst_data - src_data) & 0x8000) ? true : false;
-            FLAGS.o = (((src_data & 0x8000) && (dst_before & 0x8000) != (dst_data & 0x8000))) ? true : false;
+            FLAGS.o = OF(dst_before, src_data, OF_SUB);
             FLAGS.p = (Parity((dst_data - src_data))) ? false : true;
             FLAGS.a = ((dst_data & 0x000F) > (dst_before & 0x000F) >> 4) ? true : false;
             break;
