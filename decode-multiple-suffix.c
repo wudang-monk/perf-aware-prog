@@ -57,7 +57,7 @@ typedef union {
         u16 unused : 4;
     };
     u16 all;
-}flags;
+}Flags;
 
 // (NOTE) these enums are currently only used for mod reg r/m functions that do not encode the instruction in the reg field
 typedef enum {
@@ -127,7 +127,36 @@ typedef struct {
     u32 size;
 }buffer;
 
-flags FLAGS = {};
+typedef struct {
+    union {
+        struct {
+            reg ax;
+            reg cx;
+            reg dx;
+            reg bx;
+            reg sp;
+            reg bp;
+            reg si;
+            reg di;
+        };
+        reg registers[8];
+    };
+    union {
+        struct {
+            u16 es;
+            u16 cs;
+            u16 ss;
+            u16 ds;
+        };
+        u16 segment_registers[4];
+    };
+    Flags flags;
+    u16 ip;
+}state;
+
+state STATE = {};
+state OLD_STATE = {};
+Flags FLAGS = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
 char *Byte_Registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *Word_Registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
@@ -138,8 +167,6 @@ char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js"
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 reg Registers[8] = {};
 u16 Segment_Registers[4] = {};
-u16 IP = 0;
-u16 IP_Last = 0;
 
 instr All_Instrs[256] = {};
 instr Handled_Instrs[] = {
@@ -222,14 +249,17 @@ i16 U8ToI16(u8 high, u8 low) {
 }
 
 u8 PopBuffer(buffer *buff) {
-    buff->index = IP;
+    /* buff->index = IP; */
+    buff->index = STATE.ip;
     u8 result = *(u8*)(buff->buffer + buff->index);
-    IP += 1;
+    /* IP += 1; */
+    STATE.ip += 1;
     return result;
 }
 
 static inline void SetIP(i8 disp) {
-    IP += disp;
+    STATE.ip += disp;
+    /* IP += disp; */
 }
 
 void PrintFlags(u16 flags_state, char *string) {
@@ -263,10 +293,44 @@ void PrintRegisters() {
         }
     }
     // print IP register
-    printf("\t%s: 0x%x\n", "ip", IP);
+    printf("\t%s: 0x%x\n", "ip", STATE.ip);
     char flags_string[10] = {};
     PrintFlags(FLAGS.all, flags_string);
     printf("Flags: %s\n", flags_string);
+}
+
+void PrintStateDiff(char *asm_string) {
+    printf("%s:\n", asm_string);
+    for (int i = 0; i < ARRAY_SIZE(Registers); i++) {
+        u16 old_value = OLD_STATE.registers[i].full;
+        u16 new_value = STATE.registers[i].full;
+        u16 diff = (new_value ^ old_value);
+        if (diff) {
+            printf("\t\t%s: 0x%hx -> 0x%hx\n", Word_Registers[i], old_value, new_value);
+        }
+    }
+
+    for (int i = 0; i < ARRAY_SIZE(Segment_Registers); i++) {
+        u16 old_value = OLD_STATE.segment_registers[i];
+        u16 new_value = STATE.segment_registers[i];
+        u16 diff = (new_value ^ old_value);
+        if (diff) {
+            printf("\t%s: 0x%x\n", Segment_Reg_Names[i], STATE.segment_registers[i]);
+        }
+    }
+
+    printf("\t\tip: 0x%hx -> 0x%hx\n", OLD_STATE.ip, STATE.ip);
+
+    Flags flag_diff = {.all = OLD_STATE.flags.all ^ FLAGS.all};
+    if (flag_diff.all) {
+        char flags_before[10] = {};
+        char flags_after[10] = {};
+        PrintFlags(OLD_STATE.flags.all, flags_before);
+        PrintFlags(FLAGS.all, flags_after);
+        printf("\t\tFlags: %s -> %s\n", flags_before, flags_after);
+    } else {
+        printf("\n");
+    }
 }
 
 static inline i16 GetRegisterState(operand op) {
@@ -322,7 +386,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
 
     u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
     u16 before = Registers[dst_reg].full;
-    flags before_flags = FLAGS;
+    Flags before_flags = FLAGS;
     char *reg_name = NULL;
     if (dst.segment) {
         before = Segment_Registers[dst.reg];
@@ -405,18 +469,23 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
         Registers[dst.reg].lo = dst_data;
     }
 
-    printf("%s ; ", asm_string);
-    printf("%s: 0x%hx -> 0x%hx ip:0x%hx -> 0x%hx ", reg_name, before, Registers[dst_reg].full, IP_Last, IP);
-    flags flag_diff = {.all = before_flags.all ^ FLAGS.all};
-    if (flag_diff.all) {
-        char flags_before[10] = {};
-        char flags_after[10] = {};
-        PrintFlags(before_flags.all, flags_before);
-        PrintFlags(FLAGS.all, flags_after);
-        printf("Flags: %s -> %s\n", flags_before, flags_after);
-    } else {
-        printf("\n");
-    }
+    STATE.ax = Registers[0];
+    STATE.cx = Registers[1];
+    STATE.dx = Registers[2];
+    STATE.bx = Registers[3];
+    STATE.sp = Registers[4];
+    STATE.bp = Registers[5];
+    STATE.si = Registers[6];
+    STATE.di = Registers[7];
+
+    STATE.es = Segment_Registers[0];
+    STATE.cs = Segment_Registers[1];
+    STATE.ss = Segment_Registers[2];
+    STATE.ds = Segment_Registers[3];
+
+    STATE.flags.all = FLAGS.all;
+
+    PrintStateDiff(asm_string);
 }
 
 
@@ -578,8 +647,8 @@ int main(int argc, char *argv[]) {
     asm_buffer.index = sprintf(asm_buffer.buffer, ";;From file: %s\nbits 16\n", filename);
 
     int i = 0;
-    while (IP < bytes_read) {
-        IP_Last = IP;
+    while (STATE.ip < bytes_read) {
+        /* IP_LAST = IP; */
         b1 byte = {.full = PopBuffer(&code_buffer)};
         char command[32] = {};
         instr instr = All_Instrs[byte.full];
@@ -601,7 +670,13 @@ int main(int argc, char *argv[]) {
                 if (!FLAGS.z) {
                     SetIP(disp);
                 }
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $+2%+hd\n", instr_name, disp);
+                char asm_string[32] = {};
+                // NOTE(Peter) Remember reading that we needed to add two because of the way jumps are encoded but forgot the details
+                // look into it and place reason here.
+                disp += 2;
+                sprintf(asm_string, "%s $%+hd", instr_name, disp);
+                PrintStateDiff(asm_string);
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $%+hd\n", instr_name, disp);
                 break;
             }
             case I_MOV: {
@@ -627,6 +702,8 @@ int main(int argc, char *argv[]) {
                 break;
             }
         }
+
+        OLD_STATE = STATE;
     }
 
     /* printf("ASM File: Index: %d \n%s", asm_buffer.index, (char*)asm_buffer.buffer); */
