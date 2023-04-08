@@ -418,7 +418,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             STATE.flags.z = (dst_data == 0) ? true : false;
             STATE.flags.s = (dst_data & 0x8000) ? true : false;
             STATE.flags.p = (Parity(dst_data)) ? false : true;
-            STATE.flags.a = ((dst_data & 0x000F) > (dst_before & 0x00F0) >> 4) ? true : false;
+            STATE.flags.a = ((dst_data & 0x00FF) > (dst_before & 0x00FF)) ? true : false;
             break;
         }
         case XOR: {
@@ -431,7 +431,7 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             STATE.flags.s = ((dst_data - src_data) & 0x8000) ? true : false;
             STATE.flags.o = OF(dst_data, src_data, OF_SUB);
             STATE.flags.p = (Parity((dst_data - src_data))) ? false : true;
-            STATE.flags.a = (((dst_data - src_data) & 0x000F) > (dst_data & 0x000F) >> 4) ? true : false;
+            STATE.flags.a = (((dst_data - src_data) & 0x00FF) > (dst_data & 0x00FF)) ? true : false;
             break;
         }
         case MOV: {
