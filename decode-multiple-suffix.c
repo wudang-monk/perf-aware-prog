@@ -3,11 +3,12 @@
 #include <stdlib.h>
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
-#define SWAP(x, y) do { \
-    typeof(x) temp = (x); \
-    (x) = (y); \
-    (y) = temp; \
-} while (0)
+#define SWAP(x, y) do {                         \
+        typeof(x) temp = (x);                   \
+        (x) = (y);                              \
+        (y) = temp;                             \
+    } while (0)
+
 #define true 1
 #define false 0
 
@@ -20,9 +21,9 @@ typedef int16_t i16;
 typedef uint8_t b8;
 
 typedef enum {
-OF_ADD,
-OF_SUB
-}of_type;
+OP_ADD,
+OP_SUB,
+}math_type;
 
 typedef enum {
 MOD_MEM = 0b0,
@@ -362,15 +363,15 @@ static inline u8 Parity(u8 byte) {
         result += byte & 0b1;
         byte >>= 1;
     }
-    return (result % 2);
+    return !(result % 2);
 }
 
-static inline u8 OF(u16 num_a, u16 num_b, of_type type) {
+static inline u8 OF(u16 num_a, u16 num_b, math_type type) {
     u8 result = 0;
     u8 sign_a = (num_a >> 15);
     u8 sign_b = (num_b >> 15);
     u8 sign_a_b_equal = !(sign_a ^ sign_b);
-    if (type == OF_ADD) {
+    if (type == OP_ADD) {
         u8 sign_sum = ((num_a + num_b) >> 15);
         if (sign_a_b_equal) {
             result = sign_sum != sign_a;
@@ -382,6 +383,37 @@ static inline u8 OF(u16 num_a, u16 num_b, of_type type) {
             result = sign_a != sign_sub;
         }
     }
+    return result;
+}
+
+static inline Flags SetFlags(u16 dst, u16 src, math_type op) {
+    Flags result = {};
+    u16 new_value = 0;
+    b8 a_flag = false;
+    b8 c_flag = false;
+
+    switch(op) {
+        case OP_ADD: {
+            new_value = dst + src;
+            a_flag = ((new_value & 0x000F) < (dst & 0x000F));
+            c_flag = (u32)(dst + src) > 0xFFFF;
+            break;
+        }
+        case OP_SUB: {
+            new_value = dst - src;
+            a_flag = ((new_value & 0x00FF) > (dst & 0x00FF));
+            c_flag = (u32)(dst - src) > 0xFFFF;
+            break;
+        }
+    }
+
+    result.c = c_flag;
+    result.z = new_value == 0;
+    result.s = new_value >> 15;
+    result.o = OF(new_value, src, OP_ADD);
+    result.p = Parity(new_value);
+    result.a = a_flag;
+
     return result;
 }
 
@@ -399,14 +431,8 @@ void SimCommand(operand dst, operand src, instr inst, char *asm_string) {
     char *instr_name = Instr_Names[inst.name];
     switch(inst.name) {
         case ADD: {
-            i16 dst_before = dst_data;
-            STATE.flags.o = OF(dst_data, src_data, OF_ADD);
+            STATE.flags = SetFlags(dst_data, src_data, OP_ADD);
             dst_data += src_data;
-            STATE.flags.c = ((dst_before & 0xFF00) + (src_data & 0xFF00)) > (dst_data & 0xFF00) ? true : false;
-            STATE.flags.z = (dst_data == 0) ? true : false;
-            STATE.flags.s = (dst_data & 0x8000) ? true : false;
-            STATE.flags.p = (Parity(dst_data)) ? false : true;
-            STATE.flags.a = ((dst_data & 0x000F) < (dst_before & 0x000F)) ? true : false;
             break;
         }
         case ADC: {
@@ -426,14 +452,9 @@ void SimCommand(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         case SUB: {
-            i16 dst_before = dst_data;
-            STATE.flags.o = OF(dst_before, src_data, OF_SUB);
+            STATE.flags = SetFlags(dst_data, src_data, OP_SUB);
             dst_data -= src_data;
-            STATE.flags.c = ((dst_before & 0xFF00) - (src_data & 0xFF00)) < (dst_data & 0xFF00) ? true : false;
-            STATE.flags.z = (dst_data == 0) ? true : false;
-            STATE.flags.s = (dst_data & 0x8000) ? true : false;
-            STATE.flags.p = (Parity(dst_data)) ? false : true;
-            STATE.flags.a = ((dst_data & 0x00FF) > (dst_before & 0x00FF)) ? true : false;
+
             break;
         }
         case XOR: {
@@ -441,12 +462,7 @@ void SimCommand(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         case CMP: {
-            STATE.flags.c = ((dst_data & 0xFF00) - (src_data & 0xFF00)) < ((dst_data - src_data) & 0xFF00) ? true : false;
-            STATE.flags.z = ((dst_data - src_data) == 0) ? true : false;
-            STATE.flags.s = ((dst_data - src_data) & 0x8000) ? true : false;
-            STATE.flags.o = OF(dst_data, src_data, OF_SUB);
-            STATE.flags.p = (Parity((dst_data - src_data))) ? false : true;
-            STATE.flags.a = (((dst_data - src_data) & 0x00FF) > (dst_data & 0x00FF)) ? true : false;
+            STATE.flags = SetFlags(dst_data, src_data, OP_SUB);
             break;
         }
         case MOV: {
