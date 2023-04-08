@@ -180,7 +180,7 @@ typedef struct {
     u16 ip;
 }state;
 
-b8 SIMULATE = false;
+b8 SIMULATE = true;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -283,7 +283,8 @@ static inline void SetIP(i8 disp) {
     STATE.ip += disp;
 }
 
-void PrintFlags(u16 flags_state, char *string) {
+void PrintFlags(Flags flags, char *string) {
+    u16 flags_state = flags.all;
     u8 valid_flags[12] = {1,1,1,1,1,1,0,1,0,1,0,1};
     char flags_changed[9] = {};
     for (int i = ARRAY_SIZE(valid_flags) - 1, count = 0; i >= 0; i--) {
@@ -297,43 +298,29 @@ void PrintFlags(u16 flags_state, char *string) {
     sprintf(string, "%s", flags_changed);
 }
 
-void PrintRegisters() {
-    printf("Registers\n");
+void PrintState(char *asm_string) {
+    b8 show_diff = false;
+    char *msg = (asm_string) ? asm_string : "\nFinal Registers";
+    if (SIMULATE) {
+        show_diff = true;
+    }
+
+    printf("%s:\n", msg);
     for (int i = 0; i < ARRAY_SIZE(STATE.registers); i++) {
         u16 value = STATE.registers[i].full;
-        if (value) {
-            printf("\t%s: 0x%x\n", Word_Registers[i], value);
+        u16 old_value = (show_diff) ? OLD_STATE.registers[i].full : value;
+        u16 diff = (value ^ old_value);
+        if (diff) {
+            printf("\t\t%s: 0x%hx -> 0x%hx\n", Word_Registers[i], old_value, value);
+        } else if (value) {
+            printf("\t\t%s: 0x%hx\n", Word_Registers[i], value);
         }
     }
 
     for (int i = 0; i < ARRAY_SIZE(STATE.segment_registers); i++) {
         u16 value = STATE.segment_registers[i];
-        if (value) {
-            printf("\t%s: 0x%x\n", Segment_Reg_Names[i], STATE.segment_registers[i]);
-        }
-    }
-
-    printf("\t%s: 0x%x\n", "ip", STATE.ip);
-    char flags_string[10] = {};
-    PrintFlags(STATE.flags.all, flags_string);
-    printf("Flags: %s\n", flags_string);
-}
-
-void PrintStateDiff(char *asm_string) {
-    printf("%s:\n", asm_string);
-    for (int i = 0; i < ARRAY_SIZE(STATE.registers); i++) {
-        u16 old_value = OLD_STATE.registers[i].full;
-        u16 new_value = STATE.registers[i].full;
-        u16 diff = (new_value ^ old_value);
-        if (diff) {
-            printf("\t\t%s: 0x%hx -> 0x%hx\n", Word_Registers[i], old_value, new_value);
-        }
-    }
-
-    for (int i = 0; i < ARRAY_SIZE(STATE.segment_registers); i++) {
-        u16 old_value = OLD_STATE.segment_registers[i];
-        u16 new_value = STATE.segment_registers[i];
-        u16 diff = (new_value ^ old_value);
+        u16 old_value = (show_diff) ? OLD_STATE.segment_registers[i] : value;
+        u16 diff = (value ^ old_value);
         if (diff) {
             printf("\t%s: 0x%x\n", Segment_Reg_Names[i], STATE.segment_registers[i]);
         }
@@ -341,14 +328,14 @@ void PrintStateDiff(char *asm_string) {
 
     printf("\t\tip: 0x%hx -> 0x%hx\n", OLD_STATE.ip, STATE.ip);
 
-    if (OLD_STATE.flags.all ^ STATE.flags.all) {
-        char flags_before[10] = {};
-        char flags_after[10] = {};
-        PrintFlags(OLD_STATE.flags.all, flags_before);
-        PrintFlags(STATE.flags.all, flags_after);
-        printf("\t\tFlags: %s -> %s\n", flags_before, flags_after);
-    } else {
-        printf("\n");
+    char flags_state[10] = {};
+    PrintFlags(STATE.flags, flags_state);
+    if (show_diff && OLD_STATE.flags.all ^ STATE.flags.all) {
+        char flags_old[10] = {};
+        PrintFlags(OLD_STATE.flags, flags_old);
+        printf("\t\tFlags: %s -> %s\n", flags_old, flags_state);
+    } else if (!asm_string){
+        printf("\tFlags: %s\n", flags_state);
     }
 }
 
@@ -485,7 +472,7 @@ void SimCommand(operand dst, operand src, instr inst, char *asm_string) {
         STATE.registers[dst.reg].lo = dst_data;
     }
 
-    PrintStateDiff(asm_string);
+    PrintState(asm_string);
 }
 
 
@@ -685,28 +672,24 @@ int main(int argc, char *argv[]) {
                             if (!STATE.flags.z) {
                                 SetIP(disp);
                             }
-                            PrintStateDiff(asm_string);
                             break;
                         }
                         case JE: {
                             if (STATE.flags.z) {
                                 SetIP(disp);
                             }
-                            PrintStateDiff(asm_string);
                             break;
                         }
                         case JP: {
                             if (STATE.flags.p) {
                                 SetIP(disp);
                             }
-                            PrintStateDiff(asm_string);
                             break;
                         }
                         case JB: {
                             if (STATE.flags.c) {
                                 SetIP(disp);
                             }
-                            PrintStateDiff(asm_string);
                             break;
                         }
 
@@ -723,7 +706,6 @@ int main(int argc, char *argv[]) {
                             if (STATE.cx.full != 0 && !STATE.flags.z) {
                                 SetIP(disp);
                             }
-                            PrintStateDiff(asm_string);
                             break;
                         }
                         /* default: { */
@@ -732,6 +714,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
+                PrintState(asm_string);
                 break;
             }
             case I_MOV: {
@@ -772,7 +755,9 @@ int main(int argc, char *argv[]) {
 
     fprintf(out, "%s", (char*)asm_buffer.buffer);
     fclose(out);
-    PrintRegisters();
+    if (SIMULATE) {
+        PrintState(NULL);
+    }
 
     return 0;
 }
