@@ -40,6 +40,32 @@ I_JUMP = 5,
 I_LOOP = 6
 }inst_type;
 
+typedef enum {
+JO,
+JNO,
+JB,
+JNB,
+JE,
+JNE,
+JBE,
+JNBE,
+JS,
+JNS,
+JP,
+JNP,
+JL,
+JNL,
+JLE,
+JNLE
+}jump_type;
+
+typedef enum {
+LOOPNZ,
+LOOPZ,
+LOOP,
+JCXZ
+}loop_type;
+
 typedef union {
     struct {
         u16 c : 1;
@@ -154,6 +180,7 @@ typedef struct {
     u16 ip;
 }state;
 
+b8 SIMULATE = false;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -258,7 +285,6 @@ static inline void SetIP(i8 disp) {
 
 void PrintFlags(u16 flags_state, char *string) {
     u8 valid_flags[12] = {1,1,1,1,1,1,0,1,0,1,0,1};
-    /* flags flags_copy = {.all = FLAGS.all}; */
     char flags_changed[9] = {};
     for (int i = ARRAY_SIZE(valid_flags) - 1, count = 0; i >= 0; i--) {
         b8 valid = valid_flags[i];
@@ -286,7 +312,7 @@ void PrintRegisters() {
             printf("\t%s: 0x%x\n", Segment_Reg_Names[i], STATE.segment_registers[i]);
         }
     }
-    // print IP register
+
     printf("\t%s: 0x%x\n", "ip", STATE.ip);
     char flags_string[10] = {};
     PrintFlags(STATE.flags.all, flags_string);
@@ -369,11 +395,13 @@ static inline u8 OF(u16 num_a, u16 num_b, of_type type) {
             result = sign_a != sign_sub;
         }
     }
-    /* printf("%s: %d, %d -> %d   OF: %s\n", addition ? "ADD" : "SUB", num_a, num_b, (num_a + num_b), result ? "true" : "false"); */
     return result;
 }
 
-void Command(operand dst, operand src, instr inst, char *asm_string) {
+void SimCommand(operand dst, operand src, instr inst, char *asm_string) {
+    if (!SIMULATE) {
+        return;
+    }
     i16 dst_data = (dst.immediate) ? dst.data.full : GetRegisterState(dst);
     i16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src);
 
@@ -509,7 +537,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         }
 
         sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
-        Command(dst, src, instr, asm_string);
+        SimCommand(dst, src, instr, asm_string);
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
         return;
     }
@@ -637,17 +665,73 @@ int main(int argc, char *argv[]) {
             case I_JUMP: {
                 u8 inst_type = byte.full & 0b00001111;
                 char *instr_name = (instr.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
+                jump_type jmptype = inst_type;
+                loop_type looptype = inst_type;
                 i8 disp = PopBuffer(&code_buffer);
-                if (!STATE.flags.z) {
-                    SetIP(disp);
-                }
                 char asm_string[32] = {};
                 // NOTE(Peter) Remember reading that we needed to add two because of the way jumps are encoded but forgot the details
                 // look into it and place reason here.
-                disp += 2;
-                sprintf(asm_string, "%s $%+hd", instr_name, disp);
-                PrintStateDiff(asm_string);
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s $%+hd\n", instr_name, disp);
+                sprintf(asm_string, "%s $+2%+hd", instr_name, disp);
+                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
+
+                if (!SIMULATE) {
+                    break;
+                }
+                if (instr.type == I_JUMP) {
+                    instr_name = Jump_Names[inst_type];
+                    jmptype = inst_type;
+                    switch (jmptype) {
+                        case JNE: {
+                            if (!STATE.flags.z) {
+                                SetIP(disp);
+                            }
+                            PrintStateDiff(asm_string);
+                            break;
+                        }
+                        case JE: {
+                            if (STATE.flags.z) {
+                                SetIP(disp);
+                            }
+                            PrintStateDiff(asm_string);
+                            break;
+                        }
+                        case JP: {
+                            if (STATE.flags.p) {
+                                SetIP(disp);
+                            }
+                            PrintStateDiff(asm_string);
+                            break;
+                        }
+                        case JB: {
+                            if (STATE.flags.c) {
+                                SetIP(disp);
+                            }
+                            PrintStateDiff(asm_string);
+                            break;
+                        }
+
+                        /* default: { */
+                        /*     printf("JMP not handled: 0x%hx", byte.full); */
+                        /* } */
+                    }
+                } else {
+                    instr_name = Loop_Names[inst_type];
+                    looptype = inst_type;
+                    switch(looptype) {
+                        case LOOPNZ: {
+                            STATE.cx.full -= 1;
+                            if (STATE.cx.full != 0 && !STATE.flags.z) {
+                                SetIP(disp);
+                            }
+                            PrintStateDiff(asm_string);
+                            break;
+                        }
+                        /* default: { */
+                        /*     printf("LOOP not handled: 0x%hx", byte.full); */
+                        /* } */
+                    }
+                }
+
                 break;
             }
             case I_MOV: {
@@ -668,7 +752,7 @@ int main(int argc, char *argv[]) {
                 src.immediate = true;
                 char asm_string[32] = {};
                 sprintf(asm_string, "mov %s, %hd", dst_name, data);
-                Command(dst, src, instr, asm_string);
+                SimCommand(dst, src, instr, asm_string);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
                 break;
             }
@@ -677,7 +761,9 @@ int main(int argc, char *argv[]) {
         OLD_STATE = STATE;
     }
 
-    /* printf("ASM File: Index: %d \n%s", asm_buffer.index, (char*)asm_buffer.buffer); */
+    if (!SIMULATE) {
+        printf("ASM File: Index: %d \n%s", asm_buffer.index, (char*)asm_buffer.buffer);
+    }
     FILE *out = fopen(fileout, "w");
     if (!out) {
         fprintf(stderr, "Error opening ASM OUT file.\n");
