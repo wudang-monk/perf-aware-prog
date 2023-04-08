@@ -426,13 +426,12 @@ void Command(operand dst, operand src, instr inst, char *asm_string) {
             break;
         }
         case CMP: {
-            i16 dst_before = dst_data;
-            STATE.flags.s = ((dst_data - src_data) & 0x8000) ? true : false;
+            STATE.flags.c = ((dst_data & 0xFF00) - (src_data & 0xFF00)) < ((dst_data - src_data) & 0xFF00) ? true : false;
             STATE.flags.z = ((dst_data - src_data) == 0) ? true : false;
             STATE.flags.s = ((dst_data - src_data) & 0x8000) ? true : false;
-            STATE.flags.o = OF(dst_before, src_data, OF_SUB);
+            STATE.flags.o = OF(dst_data, src_data, OF_SUB);
             STATE.flags.p = (Parity((dst_data - src_data))) ? false : true;
-            STATE.flags.a = ((dst_data & 0x000F) > (dst_before & 0x000F) >> 4) ? true : false;
+            STATE.flags.a = (((dst_data - src_data) & 0x000F) > (dst_data & 0x000F) >> 4) ? true : false;
             break;
         }
         case MOV: {
@@ -621,7 +620,6 @@ int main(int argc, char *argv[]) {
 
     int i = 0;
     while (STATE.ip < bytes_read) {
-        /* IP_LAST = IP; */
         b1 byte = {.full = PopBuffer(&code_buffer)};
         char command[32] = {};
         instr instr = All_Instrs[byte.full];
