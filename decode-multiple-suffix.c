@@ -722,20 +722,17 @@ int main(int argc, char *argv[]) {
                 u8 wide = ((byte.full & 0x0F) >> 3);
                 u8 reg = byte.full & 0b00000111;
                 operand dst = {.wide = wide, .reg = reg};
-                operand src = {.wide = wide, .reg = reg};
-                char *dst_name = (dst.wide) ? Word_Registers[dst.reg] : Byte_Registers[dst.reg];
-                u8 data_lo = PopBuffer(&code_buffer);
-                i16 data = (i8)data_lo;
-
+                operand src = {.wide = wide, .reg = reg, .immediate = true, .data.lo = PopBuffer(&code_buffer)};
+                char *dst_name = NULL;
                 if (dst.wide) {
-                    u8 data_hi = PopBuffer(&code_buffer);
-                    data = U8ToI16(data_hi, data_lo);
+                    src.data.hi = PopBuffer(&code_buffer);
+                    dst_name = Word_Registers[dst.reg];
+                } else {
+                    dst_name = Byte_Registers[dst.reg];
                 }
 
-                src.data.full = data;
-                src.immediate = true;
                 char asm_string[32] = {};
-                sprintf(asm_string, "mov %s, %hd", dst_name, data);
+                sprintf(asm_string, "mov %s, %hd", dst_name, src.data.full);
                 SimCommand(dst, src, instr, asm_string);
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
                 break;
