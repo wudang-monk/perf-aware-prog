@@ -366,43 +366,28 @@ static inline u8 Parity(u8 byte) {
     return !(result % 2);
 }
 
-static inline u8 OF(u16 num_a, u16 num_b, math_type type) {
-    u8 result = 0;
-    u8 sign_a = (num_a >> 15);
-    u8 sign_b = (num_b >> 15);
-    u8 sign_a_b_equal = !(sign_a ^ sign_b);
-    if (type == OP_ADD) {
-        u8 sign_sum = ((num_a + num_b) >> 15);
-        if (sign_a_b_equal) {
-            result = sign_sum != sign_a;
-        }
-    } else {
-        u8 sign_sub = ((num_a - num_b) >> 15);
-        u8 sign_sub_b_equal = !(sign_sub ^ sign_b);
-        if (sign_sub_b_equal) {
-            result = sign_a != sign_sub;
-        }
-    }
-    return result;
-}
-
-static inline Flags SetFlags(u16 dst, u16 src, math_type op) {
+Flags SetFlags(u16 dst, u16 src, math_type op) {
     Flags result = {};
     u16 new_value = 0;
+    u8 dst_sign = dst >> 15;
+    u8 src_sign = dst >> 15;
     b8 a_flag = false;
     b8 c_flag = false;
+    b8 o_flag = false;
 
     switch(op) {
         case OP_ADD: {
             new_value = dst + src;
             a_flag = ((new_value & 0x000F) < (dst & 0x000F));
             c_flag = (u32)(dst + src) > 0xFFFF;
+            o_flag = (dst_sign == src_sign) && ((dst + src) >> 15 != dst_sign);
             break;
         }
         case OP_SUB: {
             new_value = dst - src;
             a_flag = ((new_value & 0x00FF) > (dst & 0x00FF));
             c_flag = (u32)(dst - src) > 0xFFFF;
+            o_flag = (dst_sign != src_sign) && ((dst - src) >> 15 != dst_sign);
             break;
         }
     }
@@ -410,7 +395,7 @@ static inline Flags SetFlags(u16 dst, u16 src, math_type op) {
     result.c = c_flag;
     result.z = new_value == 0;
     result.s = new_value >> 15;
-    result.o = OF(new_value, src, OP_ADD);
+    result.o = o_flag;
     result.p = Parity(new_value);
     result.a = a_flag;
 
