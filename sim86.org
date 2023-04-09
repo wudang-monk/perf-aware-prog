@@ -1,0 +1,15 @@
+* Work Log
+* 8086 Decoder/Simulator
+** Decoder
+*** Implemented
++ =MOV=: Reg to reg, immediate to register, rer/memory to reg/memory, segment:register mov
++ =ADD=
++ =SUB=
++ =JMPS/LOOPS=
+*** NOT Implemented
+** Simulator
+*** Implemented
+*** NOT Implemented
+* WIP
+** TODO Add memory to simulator [/]
+*** TODO Add memory immediate =mov= instruction

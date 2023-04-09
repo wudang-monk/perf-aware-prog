@@ -181,7 +181,13 @@ typedef struct {
     u16 ip;
 }state;
 
-b8 SIMULATE = true;
+typedef struct {
+    u8 slot[1000];
+    u8 size;
+}memory;
+
+memory MEMORY = {};
+b8 SIMULATE = false;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -498,16 +504,16 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         dst_string = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
 
         if (type == I_IMM_REGMEM) {
-            u8 data_lo = PopBuffer(code_buffer);
-            data.full = (i8)data_lo;
+            src.immediate = true;
+            src.data.lo =  PopBuffer(code_buffer);
+            // Sign extension ops
             if (byte.w && instr.bytes_used == 5) {
-                u8 data_hi = PopBuffer(code_buffer);
-                data.full = U8ToI16(data_hi, data_lo);
+                src.data.hi = PopBuffer(code_buffer);
+            } else {
+                src.data.full = (i16)src.data.lo;
             }
 
-            src.data.full = data.full;
-            src.immediate = true;
-            sprintf(data_str, "%hd", data.full);
+            sprintf(data_str, "%hd", src.data.full);
             src_string = data_str;
         }
 

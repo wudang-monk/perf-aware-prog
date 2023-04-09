@@ -1,0 +1,186 @@
+* All instructions
++ =MOV instructions=
+=REG/MEM/REG=      0b 10 001 0 d w : mod reg r/m
+=IM/REG/MEM=       0b 11 000 1 1 w : mod 000 r/m
+=MEM/ACC=          0b 10 100 0 0 w
+=ACC/MEM=          0b 10 100 0 1 w
+=REG/MEM/SEG_REG=  0b 10 001 1 1 0
+=REG/MEM/SEG_REG=  0b 10 001 1 0 0
+
++ =ADD instructions=
+=REG/MEM/REG=      0b 00 000 0 d w : mod reg r/m
+=IM/REG/MEM=       0b 10 000 0 s w : mod 000 r/m
+=MEM/ACC=          0b 00 000 1 0 w : data
+
++ =SUB instructions=
+=REG/MEM/REG=      0b 00 101 0 d w :  mod reg r/m
+=IM/REG/MEM=       0b 10 000 0 s w : mod 101 r/m
+=MEM/ACC=          0b 00 101 1 0 w : data
+
++ =CMP instructions=
+=REG/MEM/REG=      0b 00 111 0 d w : mod reg r/m
+=IM/REG/MEM=       0b 10 000 0 s w : mod 111 r/m
+=MEM/ACC=          0b 00 111 1 0 w : data
+
+REG_REG = 0b1000
+IM_REG_MEM = 0b1100
+IM_REG = 0b1011
+MEM_ACC = 0b1010
+** REG/MEM/REG
++ =MOV= 0b10 001 0 d w : mod reg r/m
++ =ADD= 0b00 000 0 d w : mod reg r/m
++ =SUB= 0b00 101 0 d w : mod reg r/m
++ =CMP= 0b00 111 0 d w : mod reg r/m
+** IM/REG/MEM
++ =MOV= 0b11 000 1 1 w : mod 000 r/m
++ =ADD= 0b10 000 0 s w : mod 000 r/m
++ =SUB= 0b10 000 0 s w : mod 101 r/m
++ =CMP= 0b10 000 0 s w : mod 111 r/m
+** IM/ACC
++ =MOV= 0b10 100 0 0-1 w :
++ =ADD= 0b00 000 1 0   w : data
++ =SUB= 0b00 101 1 0   w : data
++ =CMP= 0b00 111 1 0   w : data
+
+
+REG_REG     = 0b 10 001,
+IM_REG_MEM  = 0b 11 000,
+MEM_ACC     = 0b 10 100,
+
+IM_REG      = 0b 10 11 w reg
+|-----+--------------+--------------|
+| OP  | REG/MEM/REG  | IM/ACC       |
+|-----+--------------+--------------|
+| MOV | 10 001 0 d w | 10 100 0 d w |
+| ADD | 00 000 0 d w | 00 000 1 0 w |
+| SUB | 00 101 0 d w | 00 101 1 0 w |
+| CMP | 00 111 0 d w | 00 111 1 0 w |
+
+
+|-----+--------------+-------------|
+| OP  | IM/REG/MEM   | byte2       |
+|-----+--------------+-------------|
+| MOV | 11 000 1 1 w | mod 000 r/m |
+| ADD | 10 000 0 s w | mod 000 r/m |
+| SUB | 10 000 0 s w | mod 101 r/m |
+| CMP | 10 000 0 s w | mod 111 r/m |
+
+
+|--------+--------------+--------------+-----------+-----------+------+----------|
+| MOV    |              |              |           |           |      |          |
+|--------+--------------+--------------+-----------+-----------+------+----------|
+| R/M/R  | 10 001 0 d w | mod reg r/m  | (disp-lo) | (disp-hi) |      |          |
+| IR/M   | 11 000 1 1 w | mod 000 r/m  | (disp-lo) | (disp-hi) | data | data w=1 |
+| IR     | 10 11 w reg  | data         | data w=1  |           |      |          |
+| M/ACC  | 10 100 00 w  | addr-lo      | addr-hi   |           |      |          |
+| ACC/M  | 10 100 01 w  | addr-lo      | addr-hi   |           |      |          |
+| R/M-SR | 10 001 110   | mod 0 SR r/m | (disp-lo) | (disp-hi) |      |          |
+| SR-R/M | 10 001 100   | mod 0 SR r/m | (disp-lo) | (disp-hi) |      |          |
+
+
+|--------+--------------+-------------+-----------+-----------|
+| ADD    | byte1        | byte2       | byte3     | byte4     |
+|--------+--------------+-------------+-----------+-----------|
+| R/M/R  | 00 000 0 d w | mod reg r/m | (disp-lo) | (disp-hi) |
+| IR/M   | 10 000 0 s w | mod 000 r/m | (disp-lo) | (disp-hi) |
+| IM/ACC | 00 000 1 0 w | data        | data w=1  |           |
+
+|--------+--------------+-------------+-----------+-----------|
+| SUB    | byte1        | byte2       | byte3     | byte4     |
+| R/M/R  | 00 101 0 d w | mod reg r/m | (disp-lo) | (disp-hi) |
+| IR/M   | 10 000 0 s w | mod 101 r/m | (disp-lo) | (disp-hi) |
+| IM/ACC | 00 101 1 0 w | data        | data w=1  |           |
+
+|--------+--------------+-------------+-----------+-----------+------+----------|
+| CMP    | byte1        | byte2       | byte3     | byte4     |      |          |
+|--------+--------------+-------------+-----------+-----------+------+----------|
+| R/M/R  | 00 111 0 d w | mod reg r/m | (disp-lo) | (disp-hi) |      |          |
+| IR/M   | 10 000 s w   | mod 111 r/m | (disp-lo) | (disp-hi) | data | data w=1 |
+| IM/ACC | 00 111 10 w  | data        |           |           |      |          |
+
+* ADD Operations
+| 1ST BYTE |           |             |                      |                            |
+|----------+-----------+-------------+----------------------+----------------------------|
+|      HEX | BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6     | ASM-86 Instructions Format |
+|       00 | 0000 0000 | mod reg r/m | (disp-lo), (disp-hi) | ADD reg8/mem8,reg8         |
+|       01 | 0000 0001 | mod reg r/m | (disp-lo), (disp-hi) | ADD reg16/mem16/reg16      |
+|       02 | 0000 0002 | mod reg r/m | (disp-lo), (disp-hi) | ADD reg8,reg8/mem8         |
+|       03 | 0000 0003 | mod reg r/m | (disp-lo), (disp-hi) | ADD reg16,reg16/mem16      |
+|       04 | 0000 0004 | data-8      |                      | ADD AL,immed8              |
+|       05 | 0000 0005 | data-lo     | data-hi              | ADD AX,immed16             |
+|          |           |             |                      |                            |
+* Misc
+All operations seem to fall into one of two types
++ =OP DATA= The operation acts directly on the data, the second and third byte contain the data and the specifics of the operation are
+  encoded in the first byte.
+
++ =OP REG DATA= The operation uses the first and second byte to obtain the information it requires, the data is then stored in the 3,4,5,6
+  byte.
+* TODO Automated Tests [/]
+- [X] Add Basic automated testing, passes listings 37-49 (skipping 42 for now)
+- [ ] Pass listing 42
+- [ ] Add emulation testing
+
+Testing should be done outputing text to file, compiling with nasm and then checking if both files are the same
+* ASM OP test
+
+#+begin_example
+if d = 1 then "to" reg, if d = 0 then "from" reg
+if w = 1 then word instruction, if w = 0 then byte instruction
+
+if mod = 11 then r/m is treated as a REG field
+if mod = 00 then DISP = 0, disp-low, disp-hi absent. Except if mod = 00 and r/m = 110 then effective address = disp-hi:disp-lo
+if mod = 01 then DISP = disp-low sign extended to 16-bit, disp-hi absent
+if mod = 10 then DISP = disp-hi:disp-lo
+
+if r/m = 000 EA = (bs + si) + DISP
+if r/m = 001 EA = (bx + di) + DISP
+if r/m = 010 EA = (bp + si) + DISP
+if r/m = 011 EA = (bp + di) + DISP
+
+if r/m = 100 EA = (si) + DISP
+if r/m = 101 EA = (di) + DISP
+if r/m = 110 EA = (bp) + DISP
+if r/m = 111 EA = (bx) + DISP
+
+
+if s:w = 01 then 16-bits of immediate data form the operand
+if s:w = 11 then immediate data byte is sign extended to form the 16-bit operand
+if v = 0 then 'count' = 1; if v = 1 then 'count' in CL
+x = don't care
+z is used for string primitives for comparison with ZF Flag.
+
+00 ES
+01 CS
+10 SS
+11 DS
+
+Instruction which reference the falg register file as a 16-bit object use the symbol flags to represent the file.
+FLAGS = X:X:X:X: OF : DF : IF : TF : SF : ZF : X : AF : X : PF : X : CF
+#+end_example
+* Assembly GDB
+** Create executable from asm
+#+begin_example
+nasm -g -f elf32 -o program.o program.asm
+ld -m elf_i386 -o program program.o
+
+nasm -g -f elf32 -o l-48.o listing_48.asm
+ld -m elf_i386 -o l-48 l-48.o
+
+gcc -m16 -nostdlib -static foo.S
+#+end_example
+
+The =-s= option exports a localhost connection on port 1234. The =-S= pauses QEMU execution until gdb connects and issues a =continue=
+command.
+#+begin_example
+qemu-system-i386 -hda main.img -S -s &
+gdb -ex 'target remote localhost:1234' \
+    -ex 'set architecture i8086' \
+    -ex 'break *0x7c00' \
+    -ex 'continue'
+#+end_example
+
+Inside GDB type the following instead of run
+#+begin_example
+target remote :1234
+#+end_example
