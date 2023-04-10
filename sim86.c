@@ -561,6 +561,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
     dst_string = mem_addr;
 
     // Immediate to Register/Mem
+    char data_str[16] = {};
     if (type == I_IMM_REGMEM) {
         u8 data_lo = PopBuffer(code_buffer);
         data.full = (i8)data_lo;
@@ -570,14 +571,15 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
             data.full = U8ToI16(data_hi, data_lo);
         }
 
-        char data_str[16] = {};
         sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data.full);
         src_string = data_str;
     } else if (byte.d) {
         SWAP(dst_string, src_string);
     }
 
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_string, dst_string, src_string);
+    char asm_string[32] = {};
+    sprintf(asm_string, "%s %s, %s\n", instr_string, dst_string, src_string);
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s", asm_string);
 
     return;
 }
