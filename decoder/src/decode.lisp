@@ -74,16 +74,16 @@
     (file-error ()
       (format t "FILE NOT found: Invalid file path: ~a~%" path))))
 
-(defun decode-diff (bin-file &key (out-dir (concatenate 'string *listings-directory* "asm-out")))
-  (let* ((renamed-bin (format nil "~a/~a-decode" out-dir bin-file))
-         (asm-out (format nil "~a.asm" renamed-bin))
-         (bin-file-path (pathname out-dir))
-         (bin-fullpath (concatenate 'string *listings-directory* bin-file)))
-    (when (valid-truename-p bin-file-path)
-      (sb-unix:unix-mkdir out-dir #o755)
-      (sb-ext:run-program *decoder-binary* (list bin-fullpath asm-out))
-      (nasm-compile asm-out)
-      (file-diff bin-fullpath renamed-bin))))
+(defun decode-diff (file &key (out-dir (concatenate 'string *listings-directory* "asm-out")))
+  (let* ((test-file (format nil "~a/~a-decode" out-dir file))
+         (asm-out (format nil "~a.asm" test-file))
+         ;; (bin-file-path (pathname out-dir))
+         (file-fullpath (concatenate 'string *listings-directory* file)))
+    (sb-unix:unix-mkdir out-dir #o755)
+    (sb-ext:run-program *decoder-binary* (list file-fullpath asm-out))
+    (nasm-compile asm-out)
+    (file-diff file-fullpath test-file)
+    ))
 
 (defmacro check (&body forms)
   "Run each expression in 'forms' as a test case."
@@ -138,8 +138,8 @@
     (not (decode-diff "listing_0050_challenge_jumps"))
     ))
 
-;; (defun compile-asm-files (dir)
-;;   "Compiles all the asm files in a given directory"
-;;   (loop :for file :in (directory (concatenate 'string dir "*.asm"))
-;;         :when (pathname-name file)
-;;           :collect (nasm-compile (namestring file))))
+(defun compile-asm-files ()
+  "Compiles all the asm files in a given directory"
+  (loop :for file :in (directory (concatenate 'string *listings-directory* "*.asm"))
+        :when (pathname-name file)
+          :collect (nasm-compile (namestring file))))
