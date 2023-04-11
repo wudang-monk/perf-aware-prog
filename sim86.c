@@ -110,13 +110,25 @@ typedef union {
 }reg;
 
 typedef struct {
+    i16 value;
+    Flags flags;
+}op_result;
+
+typedef struct {
+    u16 value;
+    b8 memory;
+    b8 wide;
+}op_test;
+
+typedef struct {
     reg data;
     union {
         struct {
             u8 reg : 3;
             u8 wide : 1;
-            u8 immediate : 1;
+            u8 bits_hi : 1;
             u8 segment : 1;
+            u8 memory : 1;
             u8 unused : 2;
         };
         u8 byte;
@@ -136,7 +148,9 @@ typedef struct {
     u8 b1;
     op_type name;
     inst_type type;
+    // TODO(Peter) bytes_used should be temporary until we have a better understanding of this
     u8 bytes_used;
+    b8 wide;
 }instr;
 
 typedef union {
@@ -372,119 +386,160 @@ static inline u8 Parity(u8 byte) {
     return !(result % 2);
 }
 
-Flags SetFlags(u16 dst, u16 src, math_type op) {
-    Flags result = {};
-    u16 new_value = 0;
-    u8 dst_sign = dst >> 15;
-    u8 src_sign = dst >> 15;
-    b8 a_flag = false;
-    b8 c_flag = false;
-    b8 o_flag = false;
-
-    switch(op) {
-        case OP_ADD: {
-            new_value = dst + src;
-            a_flag = ((new_value & 0x000F) < (dst & 0x000F));
-            c_flag = (u32)(dst + src) > 0xFFFF;
-            o_flag = (dst_sign == src_sign) && ((dst + src) >> 15 != dst_sign);
-            break;
-        }
-        case OP_SUB: {
-            new_value = dst - src;
-            a_flag = ((new_value & 0x00FF) > (dst & 0x00FF));
-            c_flag = (u32)(dst - src) > 0xFFFF;
-            o_flag = (dst_sign != src_sign) && ((dst - src) >> 15 != dst_sign);
-            break;
-        }
+u16 FromMemory(op_test op) {
+    u16 result = 0;
+    u8 mem_lo = MEMORY.slot[op.value];
+    result = (i8)mem_lo;
+    u8 mem_hi = 0;
+    if (op.wide) {
+        mem_hi = MEMORY.slot[op.value + 1];
+        result = (i16)mem_hi << 8 | mem_lo;
     }
-
-    result.c = c_flag;
-    result.z = new_value == 0;
-    result.s = new_value >> 15;
-    result.o = o_flag;
-    result.p = Parity(new_value);
-    result.a = a_flag;
 
     return result;
 }
 
-void SimCommand(operand dst, operand src, instr inst, char *asm_string) {
-    if (!SIMULATE) {
-        return;
-    }
-    i16 dst_data = (dst.immediate) ? dst.data.full : GetRegisterState(dst);
-    i16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src);
 
-    u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg;
-    Flags before_flags = STATE.flags;
-    char *reg_name = NULL;
+// does the given operaton on the numbers given and returns modified flags
+// TODO make this function work for both 16bit/8bit numbers
+op_result OpSetFlags(op_test dst, op_test src, instr inst) {
+    op_result result = {};
+    i16 dst16 = (dst.memory) ? FromMemory(dst) : dst.value;
+    i16 src16 = (src.memory) ? FromMemory(src) : src.value;
 
-    char *instr_name = Instr_Names[inst.name];
-    switch(inst.name) {
+    u8 dst_sign = (dst.wide) ? dst16 >> 15 : dst16 >> 7;
+    u8 src_sign = (src.wide) ? src16 >> 15 : src16 >> 7;
+
+    b8 aflag = false;
+    b8 cflag = false;
+    b8 oflag = false;
+
+    i16 value = 0;
+    switch (inst.name) {
         case ADD: {
-            STATE.flags = SetFlags(dst_data, src_data, OP_ADD);
-            dst_data += src_data;
-            break;
-        }
-        case ADC: {
-            dst_data += src_data + STATE.flags.c;
-            break;
-        }
-        case SBB: {
-            dst_data -= src_data - STATE.flags.c;
-            break;
-        }
-        case OR: {
-            dst_data |= src_data;
-            break;
-        }
-        case AND: {
-            dst_data &= src_data;
-            break;
-        }
-        case SUB: {
-            STATE.flags = SetFlags(dst_data, src_data, OP_SUB);
-            dst_data -= src_data;
+        value = dst16 + src16;
 
-            break;
+        aflag = (value & 0x0F) < (dst16 & 0x0F);
+
+        if (dst.wide) {
+            cflag = (u32)((u16)dst16 + (u16)src16) > 0xFFFF;
+            oflag = (dst_sign == src_sign) && (value >> 15 != dst_sign);
+        } else {
+            cflag = (u16)((u8)dst16 + (u8)src16) > 0xFF;
+            oflag = (dst_sign == src_sign) && (value >> 7 != dst_sign);
         }
-        case XOR: {
-            dst_data ^= src_data;
-            break;
+
+        break;
+    }
+    case SUB: {
+        value = dst16 - src16;
+        aflag = (value & 0xFF) > (dst16 & 0xFF);
+
+        if (dst.wide) {
+            cflag = (u32)((u16)dst16 - (u16)src16) > 0xFFFF;
+            oflag = (dst_sign != src_sign) && (value >> 15 != dst_sign);
+
+        } else {
+            cflag = (u16)((u8)dst16 - (u8)src16) > 0xFF;
+            oflag = (dst_sign != src_sign) && (value >> 7 != dst_sign);
         }
-        case CMP: {
-            STATE.flags = SetFlags(dst_data, src_data, OP_SUB);
-            break;
-        }
-        case MOV: {
-            dst_data = src_data;
-            break;
-        }
-        default: {
-            printf("Emulator COMMAND: %d, NOT Handled\n", inst.name);
-        }
+
+        break;
+    }
     }
 
-    if (dst.segment) {
-        reg_name = Segment_Reg_Names[dst.reg];
-        STATE.segment_registers[dst.reg] = dst_data;
-    } else if (dst.wide) {
-        reg_name = Word_Registers[dst.reg];
-        STATE.registers[dst.reg].full = dst_data;
-    } else if (dst.reg > 3) {
-        reg_name = Byte_Registers[dst.reg % 4];
-        STATE.registers[dst.reg % 4].hi = dst_data;
-    } else {
-        reg_name = Byte_Registers[dst.reg];
-        STATE.registers[dst.reg].lo = dst_data;
-    }
+    b8 sflag = (dst.wide) ? value >> 15 : value >> 7;
+    b8 pflag = Parity(value);
+    b8 zflag = value == 0;
 
-    PrintState(asm_string);
+    result.value = value;
+    result.flags.c = cflag;
+    result.flags.z = zflag;
+    result.flags.s = sflag;
+    result.flags.o = oflag;
+    result.flags.p = pflag;
+    result.flags.a = aflag;
+
+    return result;
 }
 
+/* void SimCommand(operand dst, operand src, instr inst, char *asm_string) { */
+/*     if (!SIMULATE) { */
+/*         return; */
+/*     } */
+/*     i16 dst_data = (dst.immediate) ? dst.data.full : GetRegisterState(dst); */
+/*     i16 src_data = (src.immediate) ? src.data.full : GetRegisterState(src); */
 
-void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type type) {
-    b2 byte2 = {.byte = PopBuffer(code_buffer)};
+
+/*     u8 dst_reg = (!dst.wide && dst.reg > 3) ? dst.reg % 4 : dst.reg; */
+/*     Flags before_flags = STATE.flags; */
+/*     char *reg_name = NULL; */
+
+/*     char *instr_name = Instr_Names[inst.name]; */
+/*     switch(inst.name) { */
+/*         case ADD: { */
+/*             STATE.flags = SetFlags(dst_data, src_data, ADD); */
+/*             dst_data += src_data; */
+/*             break; */
+/*         } */
+/*         case ADC: { */
+/*             dst_data += src_data + STATE.flags.c; */
+/*             break; */
+/*         } */
+/*         case SBB: { */
+/*             dst_data -= src_data - STATE.flags.c; */
+/*             break; */
+/*         } */
+/*         case OR: { */
+/*             dst_data |= src_data; */
+/*             break; */
+/*         } */
+/*         case AND: { */
+/*             dst_data &= src_data; */
+/*             break; */
+/*         } */
+/*         case SUB: { */
+/*             STATE.flags = SetFlags(dst_data, src_data, OP_SUB); */
+/*             dst_data -= src_data; */
+
+/*             break; */
+/*         } */
+/*         case XOR: { */
+/*             dst_data ^= src_data; */
+/*             break; */
+/*         } */
+/*         case CMP: { */
+/*             STATE.flags = SetFlags(dst_data, src_data, OP_SUB); */
+/*             break; */
+/*         } */
+/*         case MOV: { */
+/*             dst_data = src_data; */
+/*             break; */
+/*         } */
+/*         default: { */
+/*             printf("Emulator COMMAND: %d, NOT Handled\n", inst.name); */
+/*         } */
+/*     } */
+
+/*     if (dst.segment) { */
+/*         reg_name = Segment_Reg_Names[dst.reg]; */
+/*         STATE.segment_registers[dst.reg] = dst_data; */
+/*     } else if (dst.wide) { */
+/*         reg_name = Word_Registers[dst.reg]; */
+/*         STATE.registers[dst.reg].full = dst_data; */
+/*     } else if (dst.reg > 3) { */
+/*         reg_name = Byte_Registers[dst.reg % 4]; */
+/*         STATE.registers[dst.reg % 4].hi = dst_data; */
+/*     } else { */
+/*         reg_name = Byte_Registers[dst.reg]; */
+/*         STATE.registers[dst.reg].lo = dst_data; */
+/*     } */
+
+/*     PrintState(asm_string); */
+/* } */
+
+
+void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer, buffer *asm_buffer) {
     instr instr = All_Instrs[byte.full];
     char *instr_string = Instr_Names[instr.name];
     if (instr.name == ANY) {
@@ -503,8 +558,8 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         operand src = {.reg = byte2.reg, .wide = byte.w};
         dst_string = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
 
-        if (type == I_IMM_REGMEM) {
-            src.immediate = true;
+        if (instr.type == I_IMM_REGMEM) {
+            /* src.immediate = true; */
             src.data.lo =  PopBuffer(code_buffer);
             // Sign extension ops
             if (byte.w && instr.bytes_used == 5) {
@@ -531,19 +586,30 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
         }
 
         sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
-        SimCommand(dst, src, instr, asm_string);
+        /* SimCommand(dst, src, instr, asm_string); */
         asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
         return;
     }
+}
 
-    // Memory displacement
-    u8 mem_mode_16bit_disp = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? 1 : 0;
+void DecodeMemoryInstruction(b1 fst_byte, b2 snd_byte, buffer *code_buffer, buffer *asm_buffer) {
+    instr instr = All_Instrs[fst_byte.full];
+    char *instr_string = Instr_Names[instr.name];
+    if (instr.name == ANY) {
+        instr_string = Instr_Names[snd_byte.reg];
+        instr.name = snd_byte.reg;
+    }
+
+    char *dst_string = Rm_Mem_Table[snd_byte.rm];
+    char *src_string = (fst_byte.w) ? Word_Registers[snd_byte.reg] : Byte_Registers[snd_byte.reg];
+    reg data = {};
+    u8 mem_mode_16bit_disp = (snd_byte.mod == MOD_MEM && snd_byte.rm == 0b110) ? true : false;
     reg disp = {};
 
-    if (byte2.mod == MOD_MEM_8) {
+    if (snd_byte.mod == MOD_MEM_8) {
         i8 disp_lo = PopBuffer(code_buffer);
         disp.full = (i16)disp_lo;
-    } else if ((mem_mode_16bit_disp) || byte2.mod == MOD_MEM_16) {
+    } else if ((mem_mode_16bit_disp) || snd_byte.mod == MOD_MEM_16) {
         u8 disp_lo = PopBuffer(code_buffer);
         u8 disp_hi = PopBuffer(code_buffer);
         disp.full = U8ToI16(disp_hi, disp_lo);
@@ -551,7 +617,7 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
 
     char mem_addr[32] = {};
     sprintf(mem_addr, "[%s + %hd]", dst_string, disp.full);
-    if (byte2.mod == MOD_MEM) {
+    if (snd_byte.mod == MOD_MEM) {
         sprintf(mem_addr, "[%s]", dst_string);
         if (mem_mode_16bit_disp) {
             sprintf(mem_addr, "[%hd]", disp.full);
@@ -561,28 +627,45 @@ void RegIMM_RegMem(b1 byte, buffer *code_buffer, buffer *asm_buffer, inst_type t
     dst_string = mem_addr;
 
     // Immediate to Register/Mem
+    op_result result = {};
     char data_str[16] = {};
-    if (type == I_IMM_REGMEM) {
+    if (instr.type == I_IMM_REGMEM) {
         u8 data_lo = PopBuffer(code_buffer);
-        data.full = (i8)data_lo;
+        op_test dst_op = {.memory = true, .value = disp.full};
+        op_test src_op = { .value = (i8)data_lo};
+        reg *test = (reg*)&MEMORY.slot[disp.full];
+        u8 data_hi = 0;
 
-        if (byte.w && instr.bytes_used == 5) {
-            u8 data_hi = PopBuffer(code_buffer);
-            data.full = U8ToI16(data_hi, data_lo);
+        // TODO Look for better way to deal with sign extension of 8 bit values rather that have bytes_used for all instructions
+        if (fst_byte.w && instr.bytes_used == 5) {
+            data_hi = PopBuffer(code_buffer);
+            src_op.value = (i16)data_hi << 8 | data_lo;
+            src_op.wide = true;
         }
 
-        sprintf(data_str, "%s %hd", (byte.w) ? "word" : "byte", data.full);
+        if (instr.name == MOV) {
+            if (src_op.wide) {
+                MEMORY.slot[disp.full] = data_lo;
+                MEMORY.slot[disp.full + 1] = data_hi;
+            } else {
+                MEMORY.slot[disp.full] = data_lo;
+            }
+        } else {
+            result = OpSetFlags(dst_op, src_op, instr);
+        }
+
+        sprintf(data_str, "%s %hd", (fst_byte.w) ? "word" : "byte", src_op.value);
         src_string = data_str;
-    } else if (byte.d) {
+    } else if (fst_byte.d) {
         SWAP(dst_string, src_string);
     }
-
     char asm_string[32] = {};
     sprintf(asm_string, "%s %s, %s\n", instr_string, dst_string, src_string);
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s", asm_string);
 
     return;
 }
+
 // NOTE(Peter) Look into simplifying the Acc functions or moving it to the rest of the RegImm_RegMem function
 void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     instr instr = All_Instrs[byte.full];
@@ -654,7 +737,12 @@ int main(int argc, char *argv[]) {
             }
             case I_REG_REGMEM:
             case I_IMM_REGMEM: {
-                RegIMM_RegMem(byte, &code_buffer, &asm_buffer, instr.type);
+                b2 byte2 = {.byte = PopBuffer(&code_buffer)};
+                if (byte2.mod == MOD_REG) {
+                    DecodeRegInstruction(byte, byte2, &code_buffer, &asm_buffer);
+                } else {
+                    DecodeMemoryInstruction(byte, byte2, &code_buffer, &asm_buffer);
+                }
                 break;
             }
             case I_LOOP:
@@ -730,7 +818,7 @@ int main(int argc, char *argv[]) {
                 u8 wide = ((byte.full & 0x0F) >> 3);
                 u8 reg = byte.full & 0b00000111;
                 operand dst = {.wide = wide, .reg = reg};
-                operand src = {.wide = wide, .reg = reg, .immediate = true, .data.lo = PopBuffer(&code_buffer)};
+                operand src = {.wide = wide, .reg = reg, .data.lo = PopBuffer(&code_buffer)};
                 char *dst_name = NULL;
                 if (dst.wide) {
                     src.data.hi = PopBuffer(&code_buffer);
@@ -741,7 +829,7 @@ int main(int argc, char *argv[]) {
 
                 char asm_string[32] = {};
                 sprintf(asm_string, "mov %s, %hd", dst_name, src.data.full);
-                SimCommand(dst, src, instr, asm_string);
+                /* SimCommand(dst, src, instr, asm_string); */
                 asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
                 break;
             }
