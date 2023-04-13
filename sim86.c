@@ -311,7 +311,6 @@ void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer,
 
     
     sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
 
     if (SIMULATE) {
         if (instr.name == MOV) {
@@ -323,7 +322,12 @@ void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer,
             }
             STATE.flags = result.flags;
         }
+
+    } else {
+        asm_buffer->index +=
+            sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
     }
+
     PrintState(asm_string, true);
     return;
 }
@@ -386,7 +390,6 @@ void DecodeMemoryInstruction(b1 byte1, b2 byte2, buffer *code_buffer, buffer *as
 
     char asm_string[32] = {};
     sprintf(asm_string, "%s %s, %s\n", instr_string, dst_string, src_string);
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s", asm_string);
 
     // Operation does not need to modify flags
     if (SIMULATE) {
@@ -402,6 +405,8 @@ void DecodeMemoryInstruction(b1 byte1, b2 byte2, buffer *code_buffer, buffer *as
         }
 
         PrintState(asm_string, true);
+    } else {
+        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s", asm_string);
     }
     return;
 }
@@ -430,8 +435,12 @@ void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     if (byte.d) {
         SWAP(src, dst);
     }
-    
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+
+    if (SIMULATE) {
+
+    } else {
+        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -461,7 +470,8 @@ int main(int argc, char *argv[]) {
     }
 
     buffer code_buffer = {.buffer = &file_buffer, .size = ARRAY_SIZE(file_buffer)};
-    char out_buffer[4096];
+    char out_buffer[512];
+    /* char out_buffer[1024 * 1024]; */
     buffer asm_buffer = {.buffer = &out_buffer, .size = ARRAY_SIZE(out_buffer) };
     asm_buffer.index = sprintf(asm_buffer.buffer, ";;From file: %s\nbits 16\n", filename);
 
@@ -496,7 +506,11 @@ int main(int argc, char *argv[]) {
                 // NOTE(Peter) Remember reading that we needed to add two because of the way jumps are encoded but forgot the details
                 // look into it and place reason here.
                 sprintf(asm_string, "%s $+2%+hd", instr_name, disp);
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
+                if (SIMULATE) {
+                    
+                } else {
+                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
+                }
 
                 if (!SIMULATE) {
                     break;
@@ -567,10 +581,13 @@ int main(int argc, char *argv[]) {
                     dst_name = Word_Registers[reg_];
                 } 
 
-                STATE.registers[reg_] = src_register;
                 char asm_string[32] = {};
                 sprintf(asm_string, "mov %s, %hd", dst_name, src_register.full);
-                asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
+                if (SIMULATE) {
+                    STATE.registers[reg_] = src_register;
+                } else {
+                    asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
+                }
                 PrintState(asm_string, true);
                 break;
             }

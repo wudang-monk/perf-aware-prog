@@ -151,6 +151,7 @@
     (not (decode-diff "listing_0051_memory_mov"))
     (not (decode-diff "listing_0052_memory_add_loop"))
     (not (decode-diff "listing_0053_add_loop_challenge"))
+    (not (decode-diff "listing_0054_draw_rectangle"))
     ))
 
 (defun compile-asm-files ()
