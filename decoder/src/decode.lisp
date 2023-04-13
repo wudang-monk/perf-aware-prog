@@ -103,6 +103,8 @@
      (let ((*test-name* (append *test-name* (list ',name))))
        ,@body)))
 
+(defvar *test-name* nil)
+
 (defun report-result (result test)
   "Report the results of a single test case. Called by 'check'."
   (format t "~:[FAILED~;passed~] ... ~a: ~a~%" result *test-name* test)
@@ -136,6 +138,7 @@
     (not (decode-diff "listing_0048_ip_register"))
     (not (decode-diff "listing_0049_conditional_jumps"))
     (not (decode-diff "listing_0050_challenge_jumps"))
+    (not (decode-diff "listing_0051_memory_mov"))
     ))
 
 (defun compile-asm-files ()
