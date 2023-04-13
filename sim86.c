@@ -3,7 +3,7 @@
 #include "sim86.h"
 
 memory MEMORY = {};
-b8 SIMULATE = true;
+b8 SIMULATE = false;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -609,6 +609,15 @@ int main(int argc, char *argv[]) {
     fclose(out);
     if (SIMULATE) {
         PrintState(NULL, false);
+        char *file = "sim86_mem_out.data";
+        FILE *mem_out = fopen(file, "wb");
+        if (!mem_out) {
+            fprintf(stderr, "Error opening ASM OUT file.\n");
+            return 1;
+        }
+
+        fwrite(&MEMORY.slot[0], sizeof(u8), ARRAY_SIZE(MEMORY.slot), mem_out);
+        fclose(mem_out);
     }
 
     return 0;
