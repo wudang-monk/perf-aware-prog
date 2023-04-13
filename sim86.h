@@ -1,3 +1,6 @@
+#ifndef SIM86_H
+#define SIM86_H
+
 #include <stdint.h>
 
 
@@ -111,6 +114,7 @@ typedef union {
 typedef struct {
     i16 value;
     Flags flags;
+    b8 use;
 }op_result;
 
 typedef struct {
@@ -198,3 +202,4 @@ typedef struct {
     u8 size;
 }memory;
 
+#endif //SIM86_H
