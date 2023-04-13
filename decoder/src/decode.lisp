@@ -63,6 +63,16 @@
               :collect (list i byte1 byte2) :into diff-bytes
             :finally (return diff-bytes)))))
 
+(defun bytes-diff (bytes-a bytes-b)
+  (when (and bytes-a bytes-b)
+    (loop :for i :from 0 :to (length bytes-a)
+          :for byte1 :across bytes-a
+          :for byte2 :across bytes-b
+          :unless (= byte1 byte2)
+            :collect (list i byte1 byte2) :into diff-bytes
+          :finally (return diff-bytes))))
+
+
 (defun nasm-compile (file)
   (sb-ext:run-program "/usr/bin/nasm" (list file) :output *standard-output*))
 
@@ -139,6 +149,7 @@
     (not (decode-diff "listing_0049_conditional_jumps"))
     (not (decode-diff "listing_0050_challenge_jumps"))
     (not (decode-diff "listing_0051_memory_mov"))
+    (not (decode-diff "listing_0052_memory_add_loop"))
     ))
 
 (defun compile-asm-files ()
