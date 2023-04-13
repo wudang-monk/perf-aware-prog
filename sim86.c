@@ -3,7 +3,7 @@
 #include "sim86.h"
 
 memory MEMORY = {};
-b8 SIMULATE = false;
+b8 SIMULATE = true;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -142,7 +142,7 @@ void PrintState(char *asm_string, b8 show_diff) {
     for (int i = 0; i < ARRAY_SIZE(STATE.registers); i++) {
         u16 value = STATE.registers[i].full;
         u16 old_value = (show_diff) ? OLD_STATE.registers[i].full : value;
-        u16 diff = (value ^ old_value);
+        u16 diff = (value != old_value);
         if (diff) {
             printf("\t\t%s: 0x%hx -> 0x%hx\n", Word_Registers[i], old_value, value);
         } else if (value) {
@@ -153,7 +153,7 @@ void PrintState(char *asm_string, b8 show_diff) {
     for (int i = 0; i < ARRAY_SIZE(STATE.segment_registers); i++) {
         u16 value = STATE.segment_registers[i].full;
         u16 old_value = (show_diff) ? OLD_STATE.segment_registers[i].full : value;
-        u16 diff = (value ^ old_value);
+        u16 diff = (value != old_value);
         if (diff) {
             printf("\t%s: 0x%x\n", Segment_Reg_Names[i], STATE.segment_registers[i].full);
         }
@@ -314,11 +314,15 @@ void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer,
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
 
     if (SIMULATE) {
-        op_result result = OpSetFlags(dst, src, instr);
-        if (result.use) {
-            dst_register->full = result.value;
+        if (instr.name == MOV) {
+            *dst_register = *src_register;
+        } else {
+            op_result result = OpSetFlags(dst, src, instr);
+            if (result.use) {
+              dst_register->full = result.value;
+            }
+            STATE.flags = result.flags;
         }
-        STATE.flags = result.flags;
     }
     PrintState(asm_string, true);
     return;

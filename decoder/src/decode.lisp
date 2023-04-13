@@ -150,6 +150,7 @@
     (not (decode-diff "listing_0050_challenge_jumps"))
     (not (decode-diff "listing_0051_memory_mov"))
     (not (decode-diff "listing_0052_memory_add_loop"))
+    (not (decode-diff "listing_0053_add_loop_challenge"))
     ))
 
 (defun compile-asm-files ()
