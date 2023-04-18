@@ -118,11 +118,6 @@ typedef struct {
 }op_result;
 
 typedef struct {
-    reg value;
-    b8 wide;
-}sim_op;
-
-typedef struct {
     reg data;
     union {
         struct {

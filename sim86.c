@@ -3,7 +3,7 @@
 #include "sim86.h"
 
 memory MEMORY = {};
-b8 SIMULATE = false;
+b8 SIMULATE = true;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -180,7 +180,7 @@ static inline reg* GetRegister(operand op) {
         } else {
             result = &STATE.registers[op.reg];
         }
-    } else if (op. reg > 3) {
+    } else if (op.reg > 3) {
         result = &STATE.registers[op.reg % 4];
     } else {
         result = &STATE.registers[op.reg];
@@ -200,10 +200,10 @@ static inline u8 Parity(u8 byte) {
 
 // does the given operaton on the numbers given and returns modified flags
 // TODO make this function work for both 16bit/8bit numbers
-op_result OpSetFlags(sim_op dst, sim_op src, instr inst) {
+op_result OpSetFlags(operand dst, operand src, instr inst) {
     op_result result = {.use = true};
-    i16 dst16 = dst.value.full;
-    i16 src16 = src.value.full;
+    i16 dst16 = dst.data.full;
+    i16 src16 = src.data.full;
 
     u8 dst_sign = (dst.wide) ? dst16 >> 15 : dst16 >> 7;
     u8 src_sign = (src.wide) ? src16 >> 15 : src16 >> 7;
@@ -280,19 +280,19 @@ void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer,
     char data_str[32] = {};
     reg *dst_register = &STATE.registers[byte2.rm];
     reg *src_register = &STATE.registers[byte2.reg];
-    sim_op dst = { .value = *dst_register, .wide = true};
-    sim_op src = { .value = *src_register, .wide = true};
+    operand dst = { .data = *dst_register, .wide = byte.w};
+    operand src = { .data = *src_register, .wide = byte.w};
     
     if (instr.type == I_IMM_REGMEM) {
-        src.value.lo = PopBuffer(code_buffer);
+        src.data.lo = PopBuffer(code_buffer);
         // Sign extension ops
         if (byte.w && instr.bytes_used == 5) {
-            src.value.hi = PopBuffer(code_buffer);
+            src.data.hi = PopBuffer(code_buffer);
         } else {
-            src.value.full = (i16)src.value.lo;
+            src.data.full = (i16)src.data.lo;
         }
 
-        sprintf(data_str, "%hd", src.value.full);
+        sprintf(data_str, "%hd", src.data.full);
         src_string = data_str;
     }
 
@@ -318,7 +318,11 @@ void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer,
         } else {
             op_result result = OpSetFlags(dst, src, instr);
             if (result.use) {
-              dst_register->full = result.value;
+                if (byte.w) {
+                    dst_register->full = result.value;
+                } else {
+                    dst_register->full = result.value;
+                }
             }
             STATE.flags = result.flags;
         }
@@ -365,22 +369,24 @@ void DecodeMemoryInstruction(b1 byte1, b2 byte2, buffer *code_buffer, buffer *as
     dst_string = mem_addr;
 
     // TODO might be able to simplify this and src_op/dst_op
+    operand dst_op = {.reg = byte2.rm, .wide = byte1.w};
+    operand src_op = {.reg = byte2.reg, .wide = byte1.w};
     reg *dst_register = (reg *)&MEMORY.slot[GetRmValues(byte2.rm) + disp.full];
-    reg *src_register = &STATE.registers[byte2.reg]; 
-    sim_op dst_op = { .value = *dst_register, .wide = true};
-    sim_op src_op = { .value = *src_register, .wide = true};
-    
+    reg *src_register = &STATE.registers[byte2.reg];
+    dst_op.data = *dst_register;
+    src_op.data = *GetRegister(src_op);
+
     char data_str[16] = {};
     if (instr.type == I_IMM_REGMEM) {
-        src_op.value.lo = PopBuffer(code_buffer);
+        src_op.data.lo = PopBuffer(code_buffer);
 
         // TODO Look for better way to deal with sign extension of 8 bit values rather that have bytes_used for all instructions
         if (byte1.w && instr.bytes_used == 5) {
-            src_op.value.hi = PopBuffer(code_buffer);
+            src_op.data.hi = PopBuffer(code_buffer);
             src_op.wide = true;
         }
 
-        sprintf(data_str, "%s %hd", (byte1.w) ? "word" : "byte", src_op.value.full);
+        sprintf(data_str, "%s %hd", (byte1.w) ? "word" : "byte", src_op.data.full);
         src_string = data_str;
     } else if (byte1.d) {
         SWAP(dst_op, src_op);
@@ -394,7 +400,7 @@ void DecodeMemoryInstruction(b1 byte1, b2 byte2, buffer *code_buffer, buffer *as
     // Operation does not need to modify flags
     if (SIMULATE) {
         if (instr.name == MOV) {
-            *dst_register = src_op.value;
+            dst_register->full = (byte1.w) ? src_op.data.full: src_op.data.lo;
             // Operation modifies flags
         } else {
             op_result result = OpSetFlags(dst_op, src_op, instr);
@@ -552,6 +558,13 @@ int main(int argc, char *argv[]) {
                     instr_name = Loop_Names[inst_type];
                     looptype = inst_type;
                     switch(looptype) {
+                        case LOOP: {
+                            STATE.cx.full -= 1;
+                            if (STATE.cx.full != 0) {
+                                SetIP(disp);
+                            }
+                            break;
+                        }
                         case LOOPNZ: {
                             STATE.cx.full -= 1;
                             if (STATE.cx.full != 0 && !STATE.flags.z) {
