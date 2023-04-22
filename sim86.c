@@ -139,6 +139,29 @@ static inline u16 GetRmValues(u8 reg) {
     return values[reg];
 }
 
+void Push(operand op) {
+    i16 index = STATE.sp.full;
+    index -= 1;
+    MEMORY.slot[index] = op.data.lo;
+    if (op.wide) {
+        index -= 2;
+        MEMORY.slot[index] = op.data.hi;
+    }
+    STATE.sp.full = index;
+}
+
+void Pop(operand op) {
+    i16 index = STATE.sp.full;
+    op.data.lo = MEMORY.slot[index];
+    index += 1;
+    if (op.wide) {
+        op.data.hi = MEMORY.slot[index];
+        index += 1;
+    }
+
+    STATE.sp.full = index;
+}
+
 void PrintFlags(Flags flags, char *string) {
     u16 flags_state = flags.all;
     u8 valid_flags[12] = {1,1,1,1,1,1,0,1,0,1,0,1};
