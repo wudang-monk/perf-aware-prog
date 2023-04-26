@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include "sim86.h"
 
+u8 BYTES_USED = 0;
+FILE *LOG;
 memory MEMORY = {};
-b8 SIMULATE = true;
+b8 SIMULATE = false;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -14,6 +16,7 @@ char *Rm_Mem_Table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", 
 char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov", "jmp", "push", "pop"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
+char *Mod_Names[] = {"MEM", "MEM 8", "MEM 16", "REG"};
 
 instr All_Instrs[256] = {};
 instr Handled_Instrs[] = {
@@ -34,6 +37,7 @@ instr Handled_Instrs[] = {
 {0x3A, CMP, I_REG_REGMEM, false},
 {0x3B, CMP, I_REG_REGMEM, false},
 {0x3C, CMP, I_ACC, false},
+{0x3D, CMP, I_ACC, false},
 
 {0x50, PUSH, I_PUSH, false},
 {0x51, PUSH, I_PUSH, false},
@@ -109,12 +113,6 @@ instr Handled_Instrs[] = {
 
 };
 
-
-i16 U8ToI16(u8 high, u8 low) {
-    i16 result = ((i16)high << 8 | low);
-    return result;
-}
-
 u8 PopBuffer(buffer *buff) {
     buff->index = STATE.ip;
     u8 result = *(u8*)(buff->buffer + buff->index);
@@ -139,23 +137,23 @@ static inline u16 GetRmValues(u8 reg) {
     return values[reg];
 }
 
-void Push(operand op) {
+void Push(reg op, b8 wide) {
     i16 index = STATE.sp.full;
     index -= 1;
-    MEMORY.slot[index] = op.data.lo;
-    if (op.wide) {
+    MEMORY.slot[index] = op.lo;
+    if (wide) {
         index -= 2;
-        MEMORY.slot[index] = op.data.hi;
+        MEMORY.slot[index] = op.hi;
     }
     STATE.sp.full = index;
 }
 
-void Pop(operand op) {
+void Pop(reg op, b8 wide) {
     i16 index = STATE.sp.full;
-    op.data.lo = MEMORY.slot[index];
+    op.lo = MEMORY.slot[index];
     index += 1;
-    if (op.wide) {
-        op.data.hi = MEMORY.slot[index];
+    if (wide) {
+        op.hi = MEMORY.slot[index];
         index += 1;
     }
 
@@ -240,15 +238,16 @@ static inline u8 Parity(u8 byte) {
     return !(result % 2);
 }
 
+
 // does the given operaton on the numbers given and returns modified flags
 // TODO make this function work for both 16bit/8bit numbers
-op_result OpSetFlags(operand dst, operand src, instr inst) {
+op_result OpSetFlags(reg dst, reg src, instr inst, b8 wide) {
     op_result result = {.use = true};
-    i16 dst16 = dst.data.full;
-    i16 src16 = src.data.full;
+    i16 dst16 = dst.full;
+    i16 src16 = src.full;
 
-    u8 dst_sign = (dst.wide) ? dst16 >> 15 : dst16 >> 7;
-    u8 src_sign = (src.wide) ? src16 >> 15 : src16 >> 7;
+    u8 dst_sign = (wide) ? dst16 >> 15 : dst16 >> 7;
+    u8 src_sign = (wide) ? src16 >> 15 : src16 >> 7;
 
     b8 aflag = false;
     b8 cflag = false;
@@ -261,7 +260,7 @@ op_result OpSetFlags(operand dst, operand src, instr inst) {
 
         aflag = (value & 0x0F) < (dst16 & 0x0F);
 
-        if (dst.wide) {
+        if (wide) {
             cflag = (u32)((u16)dst16 + (u16)src16) > 0xFFFF;
             oflag = (dst_sign == src_sign) && (value >> 15 != dst_sign);
         } else {
@@ -276,7 +275,7 @@ op_result OpSetFlags(operand dst, operand src, instr inst) {
         value = dst16 - src16;
         aflag = (value & 0xFF) > (dst16 & 0xFF);
 
-        if (dst.wide) {
+        if (wide) {
             cflag = (u32)((u16)dst16 - (u16)src16) > 0xFFFF;
             oflag = (dst_sign != src_sign) && (value >> 15 != dst_sign);
 
@@ -292,7 +291,7 @@ op_result OpSetFlags(operand dst, operand src, instr inst) {
     }
     }
 
-    b8 sflag = (dst.wide) ? value >> 15 : value >> 7;
+    b8 sflag = (wide) ? value >> 15 : value >> 7;
     b8 pflag = Parity(value);
     b8 zflag = value == 0;
 
@@ -307,156 +306,45 @@ op_result OpSetFlags(operand dst, operand src, instr inst) {
     return result;
 }
 
-void DecodeRegInstruction(b1 byte, b2 byte2, buffer *code_buffer,
-                          buffer *asm_buffer) {
-    instr instr = All_Instrs[byte.full];
-    char *instr_string = Instr_Names[instr.name];
-    if (instr.name == ANY) {
-        instr_string = Instr_Names[byte2.reg];
-        instr.name = byte2.reg;
-    }
+void Simulate(instr instr, operand dst, operand src, char *asm_string) {
 
-    char *dst_string = (byte.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm];
-    char *src_string = (byte.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
+    /* operand dst_op = {.reg = byte2.rm, .wide = byte1.w}; */
+    /* operand src_op = {.reg = byte2.reg, .wide = byte1.w}; */
+    /* i16 mem_slot = GetRmValues(byte2.rm) + disp.full; */
+    /* reg *dst_register = (reg *)&MEMORY.slot[mem_slot]; */
+    /* reg *src_register = &STATE.registers[byte2.reg]; */
+    /* dst_op.data = *dst_register; */
+    /* src_op.data = *GetRegister(src_op); */
 
-    char data_str[32] = {};
-    reg *dst_register = &STATE.registers[byte2.rm];
-    reg *src_register = &STATE.registers[byte2.reg];
-    operand dst = { .data = *dst_register, .wide = byte.w};
-    operand src = { .data = *src_register, .wide = byte.w};
-    
-    if (instr.type == I_IMM_REGMEM) {
-        src.data.lo = PopBuffer(code_buffer);
-        // Sign extension ops
-        if (byte.w && instr.bytes_used == 5) {
-            src.data.hi = PopBuffer(code_buffer);
-        } else {
-            src.data.full = (i16)src.data.lo;
-        }
-
-        sprintf(data_str, "%hd", src.data.full);
-        src_string = data_str;
-    }
-
-    char asm_string[32] = {};
-    // Segment mov
-    if ((byte.full == 0x8C) || (byte.full == 0x8E)) {
-        /* dst = (operand){.reg = byte2.rm, .wide = true}; */
-        /* src = (operand){.reg = byte2.reg, .wide = true, .segment = true}; */
-        dst_string = Word_Registers[byte2.rm];
-        src_string = Segment_Reg_Names[byte2.reg];
-        if (byte.d) {
-            /* SWAP(src, dst); */
-            SWAP(src_string, dst_string);
-        }
-    }
-
-    
-    sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
 
     if (SIMULATE) {
-        if (instr.name == MOV) {
-            *dst_register = *src_register;
-        } else {
-            op_result result = OpSetFlags(dst, src, instr);
-            if (result.use) {
-                if (byte.w) {
-                    dst_register->full = result.value;
-                } else {
-                    dst_register->full = result.value;
+        if (!instr.flagmod) {
+            operand op = {.byte = instr.byte1};
+            switch (instr.name) {
+                case MOV:{
+                    b8 wide = instr.byte1 & 1;
+                    dst.data.full = (wide) ? src.data.full: src.data.lo;
+                    break;
+                }
+                case PUSH:{
+                    Push(dst.data, dst.wide);
+                    break;
+                }
+                case POP:{
+                    Pop(dst.data, dst.wide);
+                    break;
                 }
             }
-            STATE.flags = result.flags;
-        }
-
-    } else {
-        asm_buffer->index +=
-            sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
-    }
-
-    PrintState(asm_string, true);
-    return;
-}
-
-void DecodeMemoryInstruction(b1 byte1, b2 byte2, buffer *code_buffer, buffer *asm_buffer) {
-    instr instr = All_Instrs[byte1.full];
-    char *instr_string = Instr_Names[instr.name];
-    if (instr.name == ANY) {
-        instr_string = Instr_Names[byte2.reg];
-        instr.name = byte2.reg;
-    }
-
-    char *dst_string = Rm_Mem_Table[byte2.rm];
-    char *src_string = (byte1.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
-    b8 m_mode16bit = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? true : false;
-    reg disp = {};
-    
-    if (byte2.mod == MOD_MEM_8) {
-        disp.lo = PopBuffer(code_buffer);
-    } else if ((m_mode16bit) || byte2.mod == MOD_MEM_16) {
-        disp.lo = PopBuffer(code_buffer);
-        disp.hi = PopBuffer(code_buffer);
-    }
-
-    char mem_addr[32] = {};
-    if (byte2.mod == MOD_MEM) {
-        sprintf(mem_addr, "[%s]", dst_string);
-        if (m_mode16bit) {
-            sprintf(mem_addr, "[%hd]", disp.full);
-        }
-    } else {
-        sprintf(mem_addr, "[%s + %d]", dst_string, (byte2.mod == MOD_MEM_8) ? disp.lo : disp.full);
-    }
-    
-    dst_string = mem_addr;
-
-    // TODO might be able to simplify this and src_op/dst_op
-    operand dst_op = {.reg = byte2.rm, .wide = byte1.w};
-    operand src_op = {.reg = byte2.reg, .wide = byte1.w};
-    reg *dst_register = (reg *)&MEMORY.slot[GetRmValues(byte2.rm) + disp.full];
-    reg *src_register = &STATE.registers[byte2.reg];
-    dst_op.data = *dst_register;
-    src_op.data = *GetRegister(src_op);
-
-    char data_str[16] = {};
-    if (instr.type == I_IMM_REGMEM) {
-        src_op.data.lo = PopBuffer(code_buffer);
-
-        // TODO Look for better way to deal with sign extension of 8 bit values rather that have bytes_used for all instructions
-        if (byte1.w && instr.bytes_used == 5) {
-            src_op.data.hi = PopBuffer(code_buffer);
-            src_op.wide = true;
-        }
-
-        sprintf(data_str, "%s %hd", (byte1.w) ? "word" : "byte", src_op.data.full);
-        src_string = data_str;
-    } else if (byte1.d) {
-        SWAP(dst_op, src_op);
-        SWAP(dst_register, src_register);
-        SWAP(dst_string, src_string);
-    }
-
-    char asm_string[32] = {};
-    sprintf(asm_string, "%s %s, %s\n", instr_string, dst_string, src_string);
-
-    // Operation does not need to modify flags
-    if (SIMULATE) {
-        if (instr.name == MOV) {
-            dst_register->full = (byte1.w) ? src_op.data.full: src_op.data.lo;
-            // Operation modifies flags
         } else {
-            op_result result = OpSetFlags(dst_op, src_op, instr);
+            op_result result = OpSetFlags(dst.data, src.data, instr, dst.wide);
             if (result.use) {
-                dst_register->full = result.value;
+                dst.data.full = result.value;
             }
             STATE.flags = result.flags;
         }
 
         PrintState(asm_string, true);
-    } else {
-        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s", asm_string);
     }
-    return;
 }
 
 // NOTE(Peter) Look into simplifying the Acc functions or moving it to the rest of the RegImm_RegMem function
@@ -484,11 +372,81 @@ void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
         SWAP(src, dst);
     }
 
-    if (SIMULATE) {
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+}
 
-    } else {
-        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+void DecodeInstruction(b1 byte1, b2 byte2, buffer* code_buffer, buffer* asm_buffer) {
+    instr instr = All_Instrs[byte1.full];
+    instr.name = (instr.name == ANY) ? byte2.reg : instr.name;
+    char *instr_string = Instr_Names[instr.name];
+    u8 bytes_used = 0;
+
+    char *dst_string = (byte2.mod == MOD_REG) ? ((byte1.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm]) : Rm_Mem_Table[byte2.rm];
+    char *src_string = (byte1.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
+
+    b8 m_mode16bit = false;
+    if (byte2.mod == MOD_MEM) {
+        dst_string = Rm_Mem_Table[byte2.rm];
+        if (byte2.rm == 0b110) {
+            m_mode16bit = true;
+        }
     }
+
+    reg disp = {};
+    if (byte2.mod == MOD_MEM_8) {
+        disp.lo = PopBuffer(code_buffer);
+    } else if ((m_mode16bit) || byte2.mod == MOD_MEM_16) {
+        disp.lo = PopBuffer(code_buffer);
+        disp.hi = PopBuffer(code_buffer);
+    }
+
+    reg data = {};
+    b8 has_data = false;
+    if (instr.type == I_IMM_REGMEM) {
+        has_data = true;
+        data.lo = PopBuffer(code_buffer);
+        if ((byte1.full == 0x81) || (byte1.full == 0xC7)) {
+            data.hi = PopBuffer(code_buffer);
+        } else {
+            data.full = (i16)data.lo;
+        }
+    }
+
+    char mem_addr[32] = {};
+    if (byte2.mod != MOD_REG) {
+        if (byte2.mod == MOD_MEM) {
+            sprintf(mem_addr, "[%s]", dst_string);
+            if (m_mode16bit) {
+                sprintf(mem_addr, "[%hd]", disp.full);
+            }
+        } else {
+            sprintf(mem_addr, "[%s + %d]", dst_string, (byte2.mod == MOD_MEM_8) ? disp.lo : disp.full);
+        }
+        dst_string = mem_addr;
+    }
+
+    char data_string[32] = {};
+    if (has_data) {
+        sprintf(data_string, "%s %hd", (byte1.w) ? "word" : "byte", data.full);
+        src_string = data_string;
+    }
+
+    if ((byte1.full == 0x8C) || (byte1.full == 0x8E)) {
+        dst_string = Word_Registers[byte2.rm];
+        src_string = Segment_Reg_Names[byte2.reg];
+        if (byte1.d) {
+            SWAP(src_string, dst_string);
+        }
+    }
+
+    if (!has_data && byte2.mod != MOD_REG && byte1.d) {
+        SWAP(src_string, dst_string);
+    }
+
+    char asm_string[32] = {};
+
+    sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
 }
 
 int main(int argc, char *argv[]) {
@@ -514,17 +472,27 @@ int main(int argc, char *argv[]) {
     fclose(fp);
     for (int i = 0; i < ARRAY_SIZE(Handled_Instrs); i++) {
         instr inst = Handled_Instrs[i];
-        All_Instrs[inst.b1] = inst;
+        All_Instrs[inst.byte1] = inst;
     }
 
     buffer code_buffer = {.buffer = &file_buffer, .size = ARRAY_SIZE(file_buffer)};
-    char out_buffer[512];
-    /* char out_buffer[1024 * 1024]; */
+    char out_buffer[2048];
     buffer asm_buffer = {.buffer = &out_buffer, .size = ARRAY_SIZE(out_buffer) };
     asm_buffer.index = sprintf(asm_buffer.buffer, ";;From file: %s\nbits 16\n", filename);
 
+    // Setup stack
+    STATE.sp.full = (i16)60000;
+
+    LOG = fopen("log.txt", "a");
+    if (!LOG) {
+        fprintf(stderr, "Error opening LOG file.\n");
+    }
+
+    fprintf(LOG, "FILE: %s\n", filename);
+
     int i = 0;
     while (STATE.ip < bytes_read) {
+        BYTES_USED = 0;
         b1 byte = {.full = PopBuffer(&code_buffer)};
         char command[32] = {};
         instr instr = All_Instrs[byte.full];
@@ -536,11 +504,7 @@ int main(int argc, char *argv[]) {
             case I_REG_REGMEM:
             case I_IMM_REGMEM: {
                 b2 byte2 = {.byte = PopBuffer(&code_buffer)};
-                if (byte2.mod == MOD_REG) {
-                    DecodeRegInstruction(byte, byte2, &code_buffer, &asm_buffer);
-                } else {
-                    DecodeMemoryInstruction(byte, byte2, &code_buffer, &asm_buffer);
-                }
+                DecodeInstruction(byte, byte2, &code_buffer, &asm_buffer);
                 break;
             }
             case I_LOOP:
@@ -627,8 +591,6 @@ int main(int argc, char *argv[]) {
                 // cannot have a variable name reg, since reg is also a type
                 u8 wide = ((byte.full & 0x0F) >> 3);
                 u8 reg_ = byte.full & 0b00000111;
-                /* operand dst = {.wide = wide, .reg = reg_}; */
-                /* operand src = {.wide = wide, .reg = reg_, .data.lo = PopBuffer(&code_buffer)}; */
                 reg src_register = {.lo = PopBuffer(&code_buffer)};
                 char *dst_name = Byte_Registers[reg_];
                 if (wide) {
@@ -664,16 +626,18 @@ int main(int argc, char *argv[]) {
     fclose(out);
     if (SIMULATE) {
         PrintState(NULL, false);
-        char *file = "sim86_mem_out.data";
-        FILE *mem_out = fopen(file, "wb");
-        if (!mem_out) {
-            fprintf(stderr, "Error opening ASM OUT file.\n");
-            return 1;
-        }
+        /* char *file = "sim86_mem_out.data"; */
+        /* FILE *mem_out = fopen(file, "wb"); */
+        /* if (!mem_out) { */
+        /*     fprintf(stderr, "Error opening ASM OUT file.\n"); */
+        /*     return 1; */
+        /* } */
 
-        fwrite(&MEMORY.slot[0], sizeof(u8), ARRAY_SIZE(MEMORY.slot), mem_out);
-        fclose(mem_out);
+        /* fwrite(&MEMORY.slot[0], sizeof(u8), ARRAY_SIZE(MEMORY.slot), mem_out); */
+        /* fclose(mem_out); */
     }
+
+
 
     return 0;
 }

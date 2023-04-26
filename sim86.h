@@ -40,7 +40,9 @@ I_IMM_REGMEM = 2,
 I_REG_REGMEM = 3,
 I_MOV = 4,
 I_JUMP = 5,
-I_LOOP = 6
+I_LOOP = 6,
+I_PUSH = 7,
+I_POP = 8
 }inst_type;
 
 typedef enum {
@@ -100,7 +102,9 @@ XOR,
 CMP = 7,
 MOV = 8,
 ANY = 9,
-JMP = 10
+JMP = 10,
+PUSH = 11,
+POP = 12
 }op_type;
 
 typedef union {
@@ -123,10 +127,8 @@ typedef struct {
         struct {
             u8 reg : 3;
             u8 wide : 1;
-            u8 bits_hi : 1;
             u8 segment : 1;
-            u8 memory : 1;
-            u8 unused : 2;
+            u8 unused : 3;
         };
         u8 byte;
     };
@@ -141,15 +143,6 @@ typedef union {
     u8 byte;
 }b2;
 
-typedef struct {
-    u8 b1;
-    op_type name;
-    inst_type type;
-    // TODO(Peter) bytes_used should be temporary until we have a better understanding of this
-    u8 bytes_used;
-    b8 wide;
-}instr;
-
 typedef union {
     struct {
         u8 w: 1;
@@ -158,6 +151,15 @@ typedef union {
     };
     u8 full;
 }b1;
+
+typedef struct {
+    u8 byte1;
+    op_type name;
+    inst_type type;
+    // TODO(Peter) bytes_used should be temporary until we have a better understanding of this
+    b8 flagmod;
+}instr;
+
 
 typedef struct {
     void *buffer;
