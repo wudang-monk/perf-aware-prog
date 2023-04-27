@@ -118,7 +118,6 @@ typedef union {
 typedef struct {
     i16 value;
     Flags flags;
-    b8 use;
 }op_result;
 
 typedef struct {

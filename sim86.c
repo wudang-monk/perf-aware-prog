@@ -242,7 +242,7 @@ static inline u8 Parity(u8 byte) {
 // does the given operaton on the numbers given and returns modified flags
 // TODO make this function work for both 16bit/8bit numbers
 op_result OpSetFlags(reg dst, reg src, instr inst, b8 wide) {
-    op_result result = {.use = true};
+    op_result result = {};
     i16 dst16 = dst.full;
     i16 src16 = src.full;
 
@@ -284,9 +284,6 @@ op_result OpSetFlags(reg dst, reg src, instr inst, b8 wide) {
             oflag = (dst_sign != src_sign) && (value >> 7 != dst_sign);
         }
 
-        if (inst.name == CMP) {
-            result.use = false;
-        }
         break;
     }
     }
@@ -337,9 +334,7 @@ void Simulate(instr instr, operand dst, operand src, char *asm_string) {
             }
         } else {
             op_result result = OpSetFlags(dst.data, src.data, instr, dst.wide);
-            if (result.use) {
-                dst.data.full = result.value;
-            }
+            dst.data.full = result.value;
             STATE.flags = result.flags;
         }
 
@@ -350,67 +345,32 @@ void Simulate(instr instr, operand dst, operand src, char *asm_string) {
 // NOTE(Peter) Look into simplifying the Acc functions or moving it to the rest of the RegImm_RegMem function
 void Acc(b1 byte, buffer *code_buffer, buffer *asm_buffer) {
     instr instr = All_Instrs[byte.full];
-    char *dst = (byte.w) ? "ax" : "al";
-    u8 data_lo = PopBuffer(code_buffer);
-    i16 data = (i8)data_lo;
+    char *dst_string = (byte.w) ? "ax" : "al";
+    reg data = { .lo = PopBuffer(code_buffer)};
     char *instr_name = Instr_Names[instr.name];
     // mov instructions always require an address lo/hi
     if (byte.w || instr.name == MOV) {
-        u8 data_hi = PopBuffer(code_buffer);
-        data = U8ToI16(data_hi, data_lo);
+        data.hi = PopBuffer(code_buffer);
     }
 
     char command[16] = {};
-    if (instr.name == MOV) {
-        sprintf(command, "[%hd]", data);
-    } else {
-        sprintf(command, "%hd", data);
-    }
+    sprintf(command, (instr.name == MOV) ? "[%hd]": "%hd", data.full);
 
-    char *src = command;
+    char *src_string = command;
     if (byte.d) {
-        SWAP(src, dst);
+        SWAP(src_string, dst_string);
     }
 
-    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst, src);
+    asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s %s, %s\n", instr_name, dst_string, src_string);
 }
 
-void DecodeInstruction(b1 byte1, b2 byte2, buffer* code_buffer, buffer* asm_buffer) {
-    instr instr = All_Instrs[byte1.full];
-    instr.name = (instr.name == ANY) ? byte2.reg : instr.name;
-    char *instr_string = Instr_Names[instr.name];
-    u8 bytes_used = 0;
-
+void WriteAsm(b1 byte1, b2 byte2, reg disp, reg data, buffer *asm_buffer, b8 isflipped, b8 has_data) {
+    instr inst = All_Instrs[byte1.full];
+    inst.name = (inst.name == ANY) ? byte2.reg : inst.name;
+    char *instr_string = Instr_Names[inst.name];
     char *dst_string = (byte2.mod == MOD_REG) ? ((byte1.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm]) : Rm_Mem_Table[byte2.rm];
     char *src_string = (byte1.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
-
-    b8 m_mode16bit = false;
-    if (byte2.mod == MOD_MEM) {
-        dst_string = Rm_Mem_Table[byte2.rm];
-        if (byte2.rm == 0b110) {
-            m_mode16bit = true;
-        }
-    }
-
-    reg disp = {};
-    if (byte2.mod == MOD_MEM_8) {
-        disp.lo = PopBuffer(code_buffer);
-    } else if ((m_mode16bit) || byte2.mod == MOD_MEM_16) {
-        disp.lo = PopBuffer(code_buffer);
-        disp.hi = PopBuffer(code_buffer);
-    }
-
-    reg data = {};
-    b8 has_data = false;
-    if (instr.type == I_IMM_REGMEM) {
-        has_data = true;
-        data.lo = PopBuffer(code_buffer);
-        if ((byte1.full == 0x81) || (byte1.full == 0xC7)) {
-            data.hi = PopBuffer(code_buffer);
-        } else {
-            data.full = (i16)data.lo;
-        }
-    }
+    b8 m_mode16bit = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? true : false;
 
     char mem_addr[32] = {};
     if (byte2.mod != MOD_REG) {
@@ -431,6 +391,10 @@ void DecodeInstruction(b1 byte1, b2 byte2, buffer* code_buffer, buffer* asm_buff
         src_string = data_string;
     }
 
+    if (isflipped) {
+        SWAP(src_string, dst_string);
+    }
+
     if ((byte1.full == 0x8C) || (byte1.full == 0x8E)) {
         dst_string = Word_Registers[byte2.rm];
         src_string = Segment_Reg_Names[byte2.reg];
@@ -439,14 +403,42 @@ void DecodeInstruction(b1 byte1, b2 byte2, buffer* code_buffer, buffer* asm_buff
         }
     }
 
-    if (!has_data && byte2.mod != MOD_REG && byte1.d) {
-        SWAP(src_string, dst_string);
-    }
-
     char asm_string[32] = {};
-
     sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
     asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
+}
+
+
+void DecodeInstruction(b1 byte1, b2 byte2, buffer* code_buffer, buffer* asm_buffer) {
+    b8 m_mode16bit = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? true : false;
+
+    reg disp = {};
+    if (byte2.mod == MOD_MEM_8) {
+        disp.lo = PopBuffer(code_buffer);
+    } else if ((m_mode16bit) || byte2.mod == MOD_MEM_16) {
+        disp.lo = PopBuffer(code_buffer);
+        disp.hi = PopBuffer(code_buffer);
+    }
+
+    reg data = {};
+    b8 has_data = false;
+    if (All_Instrs[byte1.full].type == I_IMM_REGMEM) {
+        has_data = true;
+        data.lo = PopBuffer(code_buffer);
+        if ((byte1.full == 0x81) || (byte1.full == 0xC7)) {
+            data.hi = PopBuffer(code_buffer);
+        } else {
+            data.full = (i16)data.lo;
+        }
+    }
+
+    b8 isflipped = false;
+    if (!has_data && byte2.mod != MOD_REG && byte1.d) {
+        isflipped = true;
+        /* SWAP(src_string, dst_string); */
+    }
+
+    WriteAsm(byte1, byte2, disp, data, asm_buffer, isflipped, has_data);
 }
 
 int main(int argc, char *argv[]) {
