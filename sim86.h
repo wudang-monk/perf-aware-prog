@@ -156,7 +156,6 @@ typedef struct {
     op_type name;
     inst_type type;
     // TODO(Peter) bytes_used should be temporary until we have a better understanding of this
-    b8 flagmod;
 }instr;
 
 
