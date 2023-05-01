@@ -23,11 +23,6 @@ typedef int16_t i16;
 typedef uint8_t b8;
 
 typedef enum {
-OP_ADD,
-OP_SUB,
-}math_type;
-
-typedef enum {
 MOD_MEM = 0b0,
 MOD_MEM_8 = 0b1,
 MOD_MEM_16 = 0b10,
@@ -46,29 +41,29 @@ I_POP = 8
 }inst_type;
 
 typedef enum {
-JO,
-JNO,
-JB,
-JNB,
-JE,
-JNE,
-JBE,
-JNBE,
-JS,
-JNS,
-JP,
-JNP,
-JL,
-JNL,
-JLE,
-JNLE
-}jump_type;
+J_JO,
+J_JNO,
+J_JB,
+J_JNB,
+J_JE,
+J_JNE,
+J_JBE,
+J_JNBE,
+J_JS,
+J_JNS,
+J_JP,
+J_JNP,
+J_JL,
+J_JNL,
+J_JLE,
+J_JNLE
+}jmp_type;
 
 typedef enum {
-LOOPNZ,
-LOOPZ,
-LOOP,
-JCXZ
+L_LOOPNZ,
+L_LOOPZ,
+L_LOOP,
+L_JCXZ
 }loop_type;
 
 typedef union {
@@ -101,11 +96,12 @@ SUB = 5,
 XOR,
 CMP = 7,
 MOV = 8,
-ANY = 9,
+VAR = 9,
 JMP = 10,
-PUSH = 11,
-POP = 12
-}op_type;
+LOOP = 11,
+PUSH = 12,
+POP = 13
+}op_name;
 
 typedef union {
     struct {
@@ -122,6 +118,7 @@ typedef struct {
 
 typedef struct {
     reg data;
+    reg* src_reg;
     union {
         struct {
             u8 reg : 3;
@@ -153,7 +150,7 @@ typedef union {
 
 typedef struct {
     u8 byte1;
-    op_type name;
+    op_name name;
     inst_type type;
     // TODO(Peter) bytes_used should be temporary until we have a better understanding of this
 }instr;
