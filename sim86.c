@@ -4,7 +4,7 @@
 
 FILE *LOG;
 memory MEMORY = {};
-b8 SIMULATE = true;
+b8 SIMULATE = false;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -474,6 +474,7 @@ decode_result DecodeTwoByte(b1 byte1, b2 byte2, buffer* code_buffer, char* asm_s
     }
 
     instr inst = All_Instrs[byte1.full];
+    inst.name = (inst.name == VAR) ? byte2.reg : inst.name;
     char *instr_string = Instr_Names[inst.name];
     char *dst_string = (byte2.mod == MOD_REG) ? ((byte1.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm]) : Rm_Mem_Table[byte2.rm];
 
