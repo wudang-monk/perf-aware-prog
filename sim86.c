@@ -157,12 +157,6 @@ void Pop(reg op, b8 wide) {
     STATE.sp.full = index;
 }
 
-static inline void WriteAsm(char* asm_string, buffer *asm_buffer) {
-    if (!SIMULATE) {
-        asm_buffer->index += sprintf(asm_buffer->buffer + asm_buffer->index, "%s\n", asm_string);
-    }
-}
-
 void PrintFlags(Flags flags, char *string) {
     u16 flags_state = flags.all;
     u8 valid_flags[12] = {1,1,1,1,1,1,0,1,0,1,0,1};
@@ -303,107 +297,105 @@ op_result OpSetFlags(reg dst, reg src, instr inst, b8 wide) {
     return result;
 }
 
-void Simulate(instr instr, operand dst, operand src, char *asm_string) {
-    if (SIMULATE) {
-        operand op = {.byte = instr.byte1};
-        switch (instr.name) {
-            case MOV:{
-                b8 wide = instr.byte1 & 1;
-                dst.src_reg->full = (wide) ? src.data.full: src.data.lo;
-                break;
-            }
-            case PUSH:{
-                Push(dst.data, dst.wide);
-                break;
-            }
-            case POP:{
-                Pop(dst.data, dst.wide);
-                break;
-            }
-            case ADD: {
-                op_result result = OpSetFlags(dst.data, src.data, instr, dst.wide);
-                dst.src_reg->full = result.value;
-                STATE.flags = result.flags;
-                break;
-            }
-            case SUB: {
-                op_result result = OpSetFlags(dst.data, src.data, instr, dst.wide);
-                dst.src_reg->full = result.value;
-                STATE.flags = result.flags;
-                break;
-            }
-            case CMP: {
-                op_result result = OpSetFlags(dst.data, src.data, instr, dst.wide);
-                STATE.flags = result.flags;
-                break;
-            }
-            case JMP: {
-                jmp_type jmp = instr.byte1 & 0x0F;
-                switch (jmp) {
-                    case J_JNE: {
-                        if (!STATE.flags.z) {
-                            SetIP(src.data.lo);
-                        }
-                        break;
-                    }
-                    case J_JE: {
-                        if (STATE.flags.z) {
-                            SetIP(src.data.lo);
-                        }
-                        break;
-                    }
-                    case J_JP: {
-                        if (STATE.flags.p) {
-                            SetIP(src.data.lo);
-                        }
-                        break;
-                    }
-                    case J_JB: {
-                        if (STATE.flags.c) {
-                            SetIP(src.data.lo);
-                        }
-                        break;
-                    }
-                        /* default: { */
-                        /*     printf("JMP not handled: 0x%hx", byte.full); */
-                        /* } */
-                }
-                break;
-            }
-            case LOOP: {
-                loop_type type = instr.byte1 & 0x0F;
-                switch(type) {
-                    case L_LOOP: {
-                        STATE.cx.full -= 1;
-                        if (STATE.cx.full != 0) {
-                            SetIP(src.data.lo);
-                        }
-                        break;
-                    }
-                    case L_LOOPNZ: {
-                        STATE.cx.full -= 1;
-                        if (STATE.cx.full != 0 && !STATE.flags.z) {
-                            SetIP(src.data.lo);
-                        }
-                        break;
-                    }
-                        /* default: { */
-                        /*     printf("LOOP not handled: 0x%hx", byte.full); */
-                        /* } */
-                }
+void Simulate(instr inst, operand dst, operand src, char *asm_string) {
+    operand op = {.byte = inst.byte1};
 
-                break;
-            }
+    switch (inst.name) {
+        case MOV:{
+            b8 wide = inst.byte1 & 1;
+            dst.src_reg->full = (wide) ? src.data.full: src.data.lo;
+            break;
         }
-        PrintState(asm_string, true);
+        case PUSH:{
+            Push(dst.data, dst.wide);
+            break;
+        }
+        case POP:{
+            Pop(dst.data, dst.wide);
+            break;
+        }
+        case ADD: {
+            op_result result = OpSetFlags(dst.data, src.data, inst, dst.wide);
+            dst.src_reg->full = result.value;
+            STATE.flags = result.flags;
+            break;
+        }
+        case SUB: {
+            op_result result = OpSetFlags(dst.data, src.data, inst, dst.wide);
+            dst.src_reg->full = result.value;
+            STATE.flags = result.flags;
+            break;
+        }
+        case CMP: {
+            op_result result = OpSetFlags(dst.data, src.data, inst, dst.wide);
+            STATE.flags = result.flags;
+            break;
+        }
+        case JMP: {
+            jmp_type jmp = inst.byte1 & 0x0F;
+            switch (jmp) {
+                case J_JNE: {
+                    if (!STATE.flags.z) {
+                        SetIP(src.data.lo);
+                    }
+                    break;
+                }
+                case J_JE: {
+                    if (STATE.flags.z) {
+                        SetIP(src.data.lo);
+                    }
+                    break;
+                }
+                case J_JP: {
+                    if (STATE.flags.p) {
+                        SetIP(src.data.lo);
+                    }
+                    break;
+                }
+                case J_JB: {
+                    if (STATE.flags.c) {
+                        SetIP(src.data.lo);
+                    }
+                    break;
+                }
+                    /* default: { */
+                    /*     printf("JMP not handled: 0x%hx", byte.full); */
+                    /* } */
+            }
+            break;
+        }
+        case LOOP: {
+            loop_type loop = inst.byte1 & 0x0F;
+            switch(loop) {
+                case L_LOOP: {
+                    STATE.cx.full -= 1;
+                    if (STATE.cx.full != 0) {
+                        SetIP(src.data.lo);
+                    }
+                    break;
+                }
+                case L_LOOPNZ: {
+                    STATE.cx.full -= 1;
+                    if (STATE.cx.full != 0 && !STATE.flags.z) {
+                        SetIP(src.data.lo);
+                    }
+                    break;
+                }
+                    /* default: { */
+                    /*     printf("LOOP not handled: 0x%hx", byte.full); */
+                    /* } */
+            }
+
+            break;
+        }
     }
+    PrintState(asm_string, true);
 }
 
-void DecodeOneByte(b1 byte1, buffer* code_buffer, buffer* asm_buffer) {
+decode_result DecodeOneByte(b1 byte1, buffer* code_buffer, char* asm_string) {
     instr inst = All_Instrs[byte1.full];
     operand dst_op = {.wide = byte1.w};
     operand src_op = {.wide = byte1.w};
-    char asm_string[32] = {};
     switch(inst.type) {
         case I_ACC: {
             char *dst_string = (byte1.w) ? "ax" : "al";
@@ -454,12 +446,11 @@ void DecodeOneByte(b1 byte1, buffer* code_buffer, buffer* asm_buffer) {
             break;
         }
     }
-    Simulate(inst, dst_op, src_op, asm_string);
-    WriteAsm(asm_string, asm_buffer);
+
+    return (decode_result){.dst = dst_op, .src = src_op};
 }
 
-void DecodeTwoByte(b1 byte1, buffer* code_buffer, buffer* asm_buffer) {
-    b2 byte2 = {.byte = PopBuffer(code_buffer)};
+decode_result DecodeTwoByte(b1 byte1, b2 byte2, buffer* code_buffer, char* asm_string) {
     b8 m_mode16bit = (byte2.mod == MOD_MEM && byte2.rm == 0b110) ? true : false;
 
     reg disp = {};
@@ -483,7 +474,6 @@ void DecodeTwoByte(b1 byte1, buffer* code_buffer, buffer* asm_buffer) {
     }
 
     instr inst = All_Instrs[byte1.full];
-    inst.name = (inst.name == VAR) ? byte2.reg : inst.name;
     char *instr_string = Instr_Names[inst.name];
     char *dst_string = (byte2.mod == MOD_REG) ? ((byte1.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm]) : Rm_Mem_Table[byte2.rm];
 
@@ -534,10 +524,8 @@ void DecodeTwoByte(b1 byte1, buffer* code_buffer, buffer* asm_buffer) {
         }
     }
 
-    char asm_string[32] = {};
     sprintf(asm_string, "%s %s, %s", instr_string, dst_string, src_string);
-    Simulate(inst, dst_op, src_op, asm_string);
-    WriteAsm(asm_string, asm_buffer);
+    return (decode_result){.dst = dst_op, .src = src_op};
 }
 
 int main(int argc, char *argv[]) {
@@ -584,20 +572,28 @@ int main(int argc, char *argv[]) {
     int i = 0;
     while (STATE.ip < bytes_read) {
         b1 byte1 = {.full = PopBuffer(&code_buffer)};
-        char command[32] = {};
+        char asm_string[32] = {};
         instr inst = All_Instrs[byte1.full];
+        decode_result result = {};
+
         if ((inst.type == I_REG_REGMEM) || (inst.type == I_IMM_REGMEM)) {
-            DecodeTwoByte(byte1, &code_buffer, &asm_buffer);
+            b2 byte2 = {.byte = PopBuffer(&code_buffer)};
+            inst.name = (inst.name == VAR) ? byte2.reg : inst.name;
+            result = DecodeTwoByte(byte1, byte2, &code_buffer, &asm_string[0]);
         } else {
-            DecodeOneByte(byte1, &code_buffer, &asm_buffer);
+            result = DecodeOneByte(byte1, &code_buffer, &asm_string[0]);
+        }
+
+        if (SIMULATE) {
+            Simulate(inst, result.dst, result.src, asm_string);
+        } else {
+            asm_buffer.index += sprintf(asm_buffer.buffer + asm_buffer.index, "%s\n", asm_string);
         }
 
         OLD_STATE = STATE;
     }
 
-    if (!SIMULATE) {
-        printf("ASM File: Index: %d \n%s", asm_buffer.index, (char*)asm_buffer.buffer);
-    }
+    printf("ASM File: Index: %d \n%s", asm_buffer.index, (char*)asm_buffer.buffer);
     FILE *out = fopen(fileout, "w");
     if (!out) {
         fprintf(stderr, "Error opening ASM OUT file.\n");
@@ -608,18 +604,7 @@ int main(int argc, char *argv[]) {
     fclose(out);
     if (SIMULATE) {
         PrintState(NULL, false);
-        /* char *file = "sim86_mem_out.data"; */
-        /* FILE *mem_out = fopen(file, "wb"); */
-        /* if (!mem_out) { */
-        /*     fprintf(stderr, "Error opening ASM OUT file.\n"); */
-        /*     return 1; */
-        /* } */
-
-        /* fwrite(&MEMORY.slot[0], sizeof(u8), ARRAY_SIZE(MEMORY.slot), mem_out); */
-        /* fclose(mem_out); */
     }
-
-
 
     return 0;
 }

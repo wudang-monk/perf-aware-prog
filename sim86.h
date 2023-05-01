@@ -130,6 +130,11 @@ typedef struct {
     };
 }operand;
 
+typedef struct {
+    operand dst;
+    operand src;
+}decode_result;
+
 typedef union {
     struct {
         u8 rm: 3;
