@@ -121,19 +121,6 @@ static inline void SetIP(i8 disp) {
     STATE.ip += disp;
 }
 
-static inline u16 GetRmValues(u8 reg) {
-    u16 values[8] = {};
-    values[0] = STATE.bx.full + STATE.si.full;
-    values[1] = STATE.bx.full + STATE.di.full;
-    values[2] = STATE.bp.full + STATE.si.full;
-    values[3] = STATE.bp.full + STATE.di.full;
-    values[4] = STATE.si.full;
-    values[5] = STATE.di.full;
-    values[6] = STATE.bp.full;
-    values[7] = STATE.bx.full;
-    return values[reg];
-}
-
 void Push(reg op, b8 wide) {
     i16 index = STATE.sp.full;
     index -= 1;
@@ -209,21 +196,41 @@ void PrintState(char *asm_string, b8 show_diff) {
     }
 }
 
-static inline reg* GetRegister(operand op) {
+static inline operand GetRegister(u8 reg_num, u8 wide, u8 segment, mod mod_type, i16 disp) {
+    operand op = {.wide = wide};
      reg* result = 0;
-    if (op.wide) {
-        if (op.segment) {
-            result = &STATE.segment_registers[op.reg];
-        } else {
-            result = &STATE.registers[op.reg];
-        }
-    } else if (op.reg > 3) {
-        result = &STATE.registers[op.reg % 4];
-    } else {
-        result = &STATE.registers[op.reg];
-    }
+     if (mod_type == MOD_REG) {
+         if (wide) {
+             if (segment) {
+                 result = &STATE.segment_registers[reg_num];
+             } else {
+                 result = &STATE.registers[reg_num];
+             }
+         } else if (reg_num > 3) {
+             result = &STATE.registers[reg_num % 4];
+             op.hi = true;
+         } else {
+             result = &STATE.registers[reg_num];
+         }
 
-    return result;
+         op.src_reg = result;
+         op.data = *op.src_reg;
+     } else {
+         op.memory = true;
+         u16 values[8] = {};
+         values[0] = STATE.bx.full + STATE.si.full;
+         values[1] = STATE.bx.full + STATE.di.full;
+         values[2] = STATE.bp.full + STATE.si.full;
+         values[3] = STATE.bp.full + STATE.di.full;
+         values[4] = STATE.si.full;
+         values[5] = STATE.di.full;
+         values[6] = STATE.bp.full;
+         values[7] = STATE.bx.full;
+         op.src_reg = (reg*)((u8*)&MEMORY + values[reg_num] + disp);
+         op.data.lo = op.src_reg->lo;
+     }
+
+    return op;
 }
 
 static inline u8 Parity(u8 byte) {
