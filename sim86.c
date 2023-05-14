@@ -242,13 +242,15 @@ static inline u8 Parity(u8 byte) {
     return !(result % 2);
 }
 
-op_result OpSetFlags(reg dst, reg src, instr inst, b8 wide) {
+op_result OpSetFlags(operand dst, operand src, instr inst) {
     op_result result = {};
-    i16 dst16 = dst.full;
-    i16 src16 = src.full;
+    i16 dst16 = dst.wide ? dst.data.full : dst.hi ? dst.data.hi : dst.data.lo;
+    i16 src16 = src.wide ? src.data.full : src.hi ? src.data.hi : src.data.lo;
+    dst16 = dst.memory ? dst.data.lo : dst16;
+    src16 = src.memory ? src.data.lo : src16;
 
-    u8 dst_sign = (wide) ? dst16 >> 15 : dst16 >> 7;
-    u8 src_sign = (wide) ? src16 >> 15 : src16 >> 7;
+    u8 dst_sign = (dst.wide) ? dst16 >> 15 : dst16 >> 7;
+    u8 src_sign = (dst.wide) ? src16 >> 15 : src16 >> 7;
 
     b8 aflag = false;
     b8 cflag = false;
@@ -256,40 +258,67 @@ op_result OpSetFlags(reg dst, reg src, instr inst, b8 wide) {
 
     i16 value = 0;
     switch (inst.name) {
-    case ADD: {
-        value = dst16 + src16;
-
-        aflag = (value & 0x0F) < (dst16 & 0x0F);
-
-        if (wide) {
-            cflag = (u32)((u16)dst16 + (u16)src16) > 0xFFFF;
+        case INC: {
+            value = (dst.wide) ? dst16 + 1 : (u8)dst16 + 1;
+            aflag = (value & 0x0F) < (dst16 & 0x0F);
             oflag = (dst_sign == src_sign) && (value >> 15 != dst_sign);
-        } else {
-            cflag = (u16)((u8)dst16 + (u8)src16) > 0xFF;
-            oflag = (dst_sign == src_sign) && (value >> 7 != dst_sign);
+            break;
         }
-
-        break;
-    }
-    case CMP:
-    case SUB: {
-        value = dst16 - src16;
-        aflag = (value & 0xFF) > (dst16 & 0xFF);
-
-        if (wide) {
-            cflag = (u32)((u16)dst16 - (u16)src16) > 0xFFFF;
+        case DEC: {
+            value = dst16 -=1;
+            aflag = (value & 0xFF) > (dst16 & 0xFF);
             oflag = (dst_sign != src_sign) && (value >> 15 != dst_sign);
-
-        } else {
-            cflag = (u16)((u8)dst16 - (u8)src16) > 0xFF;
-            oflag = (dst_sign != src_sign) && (value >> 7 != dst_sign);
+            break;
         }
+        case LOG_1: {
+            value = dst16 >> 1;
+            cflag = dst16 & 0x1;
+            break;
+        }
+        case ADD: {
+            value = dst16 + src16;
+            aflag = (value & 0x0F) < (dst16 & 0x0F);
 
-        break;
-    }
+            if (dst.wide) {
+                cflag = (u32)((u16)dst16 + (u16)src16) > 0xFFFF;
+                oflag = (dst_sign == src_sign) && (value >> 15 != dst_sign);
+            } else {
+                cflag = (u16)((u8)dst16 + (u8)src16) > 0xFF;
+                oflag = (dst_sign == src_sign) && (value >> 7 != dst_sign);
+            }
+
+            break;
+        }
+        case CMP:
+        case SUB: {
+            value = dst16 - src16;
+            aflag = (value & 0xFF) > (dst16 & 0xFF);
+
+            if (dst.wide) {
+                cflag = (u32)((u16)dst16 - (u16)src16) > 0xFFFF;
+                oflag = (dst_sign != src_sign) && (value >> 15 != dst_sign);
+
+            } else {
+                cflag = (u16)((u8)dst16 - (u8)src16) > 0xFF;
+                oflag = (dst_sign != src_sign) && (value >> 7 != dst_sign);
+            }
+
+            break;
+        }
+        case XOR: {
+            value = dst16 ^ src16;
+            cflag = 0;
+            oflag = 0;
+            break;
+        }
+        case TEST: {
+            cflag = 0;
+            oflag = 0;
+            break;
+        }
     }
 
-    b8 sflag = (wide) ? value >> 15 : value >> 7;
+    b8 sflag = (dst.wide) ? value >> 15 : value >> 7;
     b8 pflag = Parity(value);
     b8 zflag = value == 0;
 
@@ -309,8 +338,16 @@ void Simulate(instr inst, operand dst, operand src, char *asm_string) {
 
     switch (inst.name) {
         case MOV:{
-            b8 wide = inst.byte1 & 1;
-            dst.src_reg->full = (wide) ? src.data.full: src.data.lo;
+            if (dst.wide) {
+                dst.src_reg->full = src.data.full;
+            } else {
+                if (dst.hi) {
+                    dst.src_reg->hi = src.data.hi;
+                } else {
+                    dst.src_reg->lo = src.data.lo;
+                }
+            }
+
             break;
         }
         case PUSH:{
@@ -321,20 +358,28 @@ void Simulate(instr inst, operand dst, operand src, char *asm_string) {
             Pop(dst.data, dst.wide);
             break;
         }
-        case ADD: {
-            op_result result = OpSetFlags(dst.data, src.data, inst, dst.wide);
-            dst.src_reg->full = result.value;
-            STATE.flags = result.flags;
-            break;
-        }
-        case SUB: {
-            op_result result = OpSetFlags(dst.data, src.data, inst, dst.wide);
-            dst.src_reg->full = result.value;
+        case LOG_1:
+        case INC: 
+        case DEC: 
+        case ADD:
+        case SUB:
+        case XOR: {
+            op_result result = OpSetFlags(dst, src, inst);
+            if (dst.wide) {
+                dst.src_reg->full = result.value;
+            } else {
+                if (dst.hi) {
+                    dst.src_reg->hi = result.value;
+                } else {
+                    dst.src_reg->lo = result.value;
+                }
+            }
+
             STATE.flags = result.flags;
             break;
         }
         case CMP: {
-            op_result result = OpSetFlags(dst.data, src.data, inst, dst.wide);
+            op_result result = OpSetFlags(dst, src, inst);
             STATE.flags = result.flags;
             break;
         }
