@@ -37,7 +37,9 @@ I_MOV = 4,
 I_JUMP = 5,
 I_LOOP = 6,
 I_PUSH = 7,
-I_POP = 8
+I_POP = 8,
+I_RET = 9,
+I_INC = 10,
 }inst_type;
 
 typedef enum {
@@ -100,7 +102,12 @@ VAR = 9,
 JMP = 10,
 LOOP = 11,
 PUSH = 12,
-POP = 13
+POP = 13,
+TEST = 14,
+RET = 15,
+INC = 16,
+DEC = 17,
+LOG_1 = 18,
 }op_name;
 
 typedef union {
@@ -121,10 +128,11 @@ typedef struct {
     reg* src_reg;
     union {
         struct {
-            u8 reg : 3;
+            u8 memory : 1;
             u8 wide : 1;
             u8 segment : 1;
-            u8 unused : 3;
+            u8 hi : 1;
+            u8 unused : 4;
         };
         u8 byte;
     };
@@ -157,7 +165,6 @@ typedef struct {
     u8 byte1;
     op_name name;
     inst_type type;
-    // TODO(Peter) bytes_used should be temporary until we have a better understanding of this
 }instr;
 
 

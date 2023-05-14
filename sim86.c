@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include "sim86.h"
 
-FILE *LOG;
+FILE *LOGFILE;
 memory MEMORY = {};
 b8 SIMULATE = false;
+b8 RUNNING = true;
 state STATE = {};
 state OLD_STATE = {};
 char Flag_Names[] = {'O', 'D', 'I', 'T', 'S', 'Z', '\000', 'A', '\000', 'P', '\000', 'C'};
@@ -12,7 +13,8 @@ char *Byte_Registers[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 char *Word_Registers[] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
 char *Segment_Reg_Names[] = {"es", "cs", "ss", "ds"};
 char *Rm_Mem_Table[] = {"bx + si", "bx + di", "bp + si", "bp + di", "si", "di", "bp", "bx"};
-char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov", "jmp", "push", "pop"};
+char *Instr_Names[] = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov", "var","jmp", "loop", "push", "pop", "test", "ret",
+"inc", "dec", "shr"};
 char *Jump_Names[] = {"jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jnle"};
 char *Loop_Names[] = {"loopnz", "loopz", "loop", "jcxz"};
 
@@ -30,12 +32,37 @@ instr Handled_Instrs[] = {
 {0x2B, SUB, I_REG_REGMEM},
 {0x2C, SUB,I_ACC},
 {0x2D, SUB,I_ACC},
+{0x30, XOR, I_REG_REGMEM},
+{0x31, XOR, I_REG_REGMEM},
+{0x32, XOR, I_REG_REGMEM},
+{0x33, XOR, I_REG_REGMEM},
+{0x34, XOR, I_ACC},
+{0x35, XOR, I_ACC},
+
 {0x38, CMP, I_REG_REGMEM},
 {0x39, CMP, I_REG_REGMEM},
 {0x3A, CMP, I_REG_REGMEM},
 {0x3B, CMP, I_REG_REGMEM},
 {0x3C, CMP, I_ACC},
 {0x3D, CMP, I_ACC},
+
+{0x40, INC, I_INC},
+{0x41, INC, I_INC},
+{0x42, INC, I_INC},
+{0x43, INC, I_INC},
+{0x44, INC, I_INC},
+{0x45, INC, I_INC},
+{0x46, INC, I_INC},
+{0x47, INC, I_INC},
+
+{0x48, DEC, I_INC},
+{0x49, DEC, I_INC},
+{0x4A, DEC, I_INC},
+{0x4B, DEC, I_INC},
+{0x4C, DEC, I_INC},
+{0x4D, DEC, I_INC},
+{0x4E, DEC, I_INC},
+{0x4F, DEC, I_INC},
 
 {0x50, PUSH, I_PUSH},
 {0x51, PUSH, I_PUSH},
@@ -75,6 +102,9 @@ instr Handled_Instrs[] = {
 {0x81, VAR, I_IMM_REGMEM},
 {0x82, VAR, I_IMM_REGMEM},
 {0x83, VAR, I_IMM_REGMEM},
+{0x84, TEST, I_REG_REGMEM},
+{0x85, TEST, I_REG_REGMEM},
+
 {0x88, MOV, I_REG_REGMEM},
 {0x89, MOV, I_REG_REGMEM},
 {0x8A, MOV, I_REG_REGMEM},
@@ -85,6 +115,9 @@ instr Handled_Instrs[] = {
 {0xA1, MOV, I_ACC},
 {0xA2, MOV, I_ACC},
 {0xA3, MOV, I_ACC},
+{0xA8, TEST, I_ACC},
+{0xA9, TEST, I_ACC},
+
 {0xB0, MOV, I_MOV},
 {0xB1, MOV, I_MOV},
 {0xB2, MOV, I_MOV},
@@ -101,8 +134,17 @@ instr Handled_Instrs[] = {
 {0xBD, MOV, I_MOV},
 {0xBE, MOV, I_MOV},
 {0xBF, MOV, I_MOV},
+
+{0xC3, RET, I_RET},
+
 {0xC6, MOV, I_IMM_REGMEM},
 {0xC7, MOV, I_IMM_REGMEM},
+
+{0xD0, LOG_1, I_REG_REGMEM},
+{0xD1, LOG_1, I_REG_REGMEM},
+{0xD2, LOG_1, I_REG_REGMEM},
+{0xD3, LOG_1, I_REG_REGMEM},
+
 {0xE0, LOOP, I_LOOP},
 {0xE1, LOOP, I_LOOP},
 {0xE2, LOOP, I_LOOP},
@@ -453,8 +495,7 @@ decode_result DecodeOneByte(b1 byte1, buffer* code_buffer, char* asm_string) {
             char *dst_string = (byte1.w) ? "ax" : "al";
             char *instr_name = Instr_Names[inst.name];
             src_op.data.lo = PopBuffer(code_buffer);
-            dst_op.src_reg = GetRegister(dst_op);
-            dst_op.data = *dst_op.src_reg;
+            dst_op = GetRegister(0, byte1.w, false, MOD_REG, 0);
 
             if (byte1.w || inst.name == MOV) {
                 src_op.data.hi = PopBuffer(code_buffer);
@@ -473,12 +514,9 @@ decode_result DecodeOneByte(b1 byte1, buffer* code_buffer, char* asm_string) {
         }
         case I_MOV: {
             u8 wide = ((byte1.full & 0x0F) >> 3);
-            u8 mov_reg = byte1.full & 0b00000111;
-            char *dst_name = (wide) ? Word_Registers[mov_reg] : Byte_Registers[mov_reg];
-            dst_op.reg = mov_reg;
-            dst_op.wide = wide;
-            dst_op.src_reg = GetRegister(dst_op);
-            dst_op.data = *dst_op.src_reg;
+            u8 reg = byte1.full & 0b00000111;
+            char *dst_name = (wide) ? Word_Registers[reg] : Byte_Registers[reg];
+            dst_op = GetRegister(reg, wide, false, MOD_REG, 0);
 
             src_op.data.lo = PopBuffer(code_buffer);
 
@@ -494,7 +532,23 @@ decode_result DecodeOneByte(b1 byte1, buffer* code_buffer, char* asm_string) {
             u8 inst_type = byte1.full & 0b00001111;
             char *instr_name = (inst.type == I_JUMP) ? Jump_Names[inst_type] : Loop_Names[inst_type];
             src_op.data.lo = PopBuffer(code_buffer);
-            sprintf(asm_string, "%s $+2%+hd", instr_name, src_op.data.lo);
+            sprintf(asm_string, "%s $%+hd", instr_name, (i8)(src_op.data.lo + 2));
+            break;
+        }
+        case I_RET: {
+            char *instr_name = Instr_Names[inst.name];
+            sprintf(asm_string, "%s", instr_name);
+            RUNNING = false;
+            break;
+        }
+        case I_INC: {
+            u8 reg = (byte1.full & 0x7);
+            b8 dec = (byte1.full & 0x0F) >> 3;
+            char *dst = Word_Registers[reg];
+            char *instr_name = (dec) ? "dec" : "inc";
+            dst_op = GetRegister(reg, true, false, MOD_REG, 0);
+
+            sprintf(asm_string, "%s %s", instr_name, dst);
             break;
         }
     }
@@ -530,13 +584,8 @@ decode_result DecodeTwoByte(b1 byte1, b2 byte2, buffer* code_buffer, char* asm_s
     char *instr_string = Instr_Names[inst.name];
     char *dst_string = (byte2.mod == MOD_REG) ? ((byte1.w) ? Word_Registers[byte2.rm] : Byte_Registers[byte2.rm]) : Rm_Mem_Table[byte2.rm];
 
-    operand dst_op = {.reg = byte2.rm, .wide = byte1.w, .segment = false};
-    dst_op.src_reg = GetRegister(dst_op);
-    dst_op.data = *dst_op.src_reg;
-
-    operand src_op = {.reg = byte2.reg, .wide = byte1.w, .segment = false};
-    src_op.src_reg = GetRegister(src_op);
-    src_op.data = *src_op.src_reg;
+    operand dst_op =  GetRegister(byte2.rm, byte1.w, false, byte2.mod, disp.full);
+    operand src_op = GetRegister(byte2.reg, byte1.w, false, MOD_REG, 0);
 
     char *src_string = (byte1.w) ? Word_Registers[byte2.reg] : Byte_Registers[byte2.reg];
 
@@ -550,10 +599,8 @@ decode_result DecodeTwoByte(b1 byte1, b2 byte2, buffer* code_buffer, char* asm_s
             }
         } else {
             sprintf(mem_addr, "[%s + %d]", dst_string, (byte2.mod == MOD_MEM_8) ? disp.lo : disp.full);
-            dst_op.src_reg = (reg*)((u8*)&MEMORY + GetRmValues(byte2.rm) + disp.full);
         }
         dst_string = mem_addr;
-        dst_op.data = *dst_op.src_reg;
     }
 
     char data_string[32] = {};
@@ -615,15 +662,15 @@ int main(int argc, char *argv[]) {
     // Setup stack
     STATE.sp.full = (i16)60000;
 
-    LOG = fopen("log.txt", "a");
-    if (!LOG) {
+    LOGFILE = fopen("log.txt", "a");
+    if (!LOGFILE) {
         fprintf(stderr, "Error opening LOG file.\n");
     }
 
-    fprintf(LOG, "FILE: %s\n", filename);
+    fprintf(LOGFILE, "FILE: %s\n", filename);
 
     int i = 0;
-    while (STATE.ip < bytes_read) {
+    while (STATE.ip < bytes_read && RUNNING) {
         b1 byte1 = {.full = PopBuffer(&code_buffer)};
         char asm_string[32] = {};
         instr inst = All_Instrs[byte1.full];
