@@ -11,9 +11,12 @@
 *** Implemented
 *** NOT Implemented
 * WIP
-** TODO Add memory to simulator [/]
-*** DONE Add memory immediate instructions
-*** TODO Add memory to register instructions
+** DONE ADD memory to simulator [/]
+*** DONE ADD memory immediate instructions
+*** DONE ADD memory to register instructions
+** TODO ADD Stack Memory
+Since the machine instructions are not copied into the ~MEMORY~ array, we essentially have something more similar to the Haravard
+architecture than Von Neumann architecture. Programs should not be able to corrupt their own source code.
 * Misc
 The function ~SimCommand~ which is supposed to take care of simulating a given command is doing work that we already have done previously in
 other functions such as ~RegIMM_RegMem~. A better approach is probably to remove it an put all the functionality into the functions that
